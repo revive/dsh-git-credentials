@@ -16,9 +16,48 @@ export interface GitLabSettingsPanelInjected {
   children?: never
 }
 
+/** One supported forge provider. */
+type ProviderId = 'gitlab' | 'github' | 'gitee' | 'gitea' | 'bitbucket'
+
+/** Display label per provider. */
+const PROVIDER_LABELS: Record<ProviderId, string> = {
+  gitlab: 'GitLab',
+  github: 'GitHub',
+  gitee: 'Gitee',
+  gitea: 'Gitea',
+  bitbucket: 'Bitbucket',
+}
+
+/** Default token reference per provider. */
+const DEFAULT_TOKEN_REFS: Record<ProviderId, string> = {
+  gitlab: 'GITLAB_TOKEN',
+  github: 'GITHUB_TOKEN',
+  gitee: 'GITEE_TOKEN',
+  gitea: 'GITEA_TOKEN',
+  bitbucket: 'BITBUCKET_TOKEN',
+}
+
+/** Default API base URL per provider (empty = user must fill it in). */
+const DEFAULT_BASE_URLS: Record<ProviderId, string> = {
+  gitlab: '',
+  github: 'https://api.github.com',
+  gitee: 'https://gitee.com/api/v5',
+  gitea: '',
+  bitbucket: 'https://api.bitbucket.org/2.0',
+}
+
+/** Base-URL input placeholder per provider. */
+const BASE_URL_PLACEHOLDERS: Record<ProviderId, string> = {
+  gitlab: 'GitLab 地址，如 https://gitlab.example.com',
+  github: 'https://api.github.com',
+  gitee: 'https://gitee.com/api/v5',
+  gitea: 'Gitea 地址，如 https://gitea.example.com/api/v1',
+  bitbucket: 'https://api.bitbucket.org/2.0',
+}
+
 /** One site as the admin state reports it. */
 interface AdminSite {
-  provider: 'gitlab' | 'github'
+  provider: ProviderId
   baseUrl: string
   tokenRef: string
   defaultProject?: string
@@ -39,7 +78,7 @@ interface AdminState {
 
 /** One site's editable draft (local state; token never round-trips). */
 interface SiteDraft {
-  provider: 'gitlab' | 'github'
+  provider: ProviderId
   baseUrl: string
   tokenRef: string
   defaultProject: string
@@ -127,7 +166,7 @@ function Loaded(): ReactNode {
   const [editing, setEditing] = useState<Record<string, boolean>>({})
   // New-site form state.
   const [newId, setNewId] = useState('')
-  const [newProvider, setNewProvider] = useState<'gitlab' | 'github'>('gitlab')
+  const [newProvider, setNewProvider] = useState<ProviderId>('gitlab')
   const [newBaseUrl, setNewBaseUrl] = useState('')
   const [newTokenRef, setNewTokenRef] = useState('GITLAB_TOKEN')
   const [newToken, setNewToken] = useState('')
@@ -201,7 +240,7 @@ function Loaded(): ReactNode {
           return (
             <div key={id} style={rowStyle}>
               <strong style={{ minWidth: 80 }}>{id}</strong>
-              <span style={{ minWidth: 60 }}>{site.provider === 'github' ? 'GitHub' : 'GitLab'}</span>
+              <span style={{ minWidth: 60 }}>{PROVIDER_LABELS[site.provider]}</span>
               <span style={fieldStyle} title="API 地址">{site.baseUrl}</span>
               <span style={fieldStyle} title="token 引用名">{site.tokenRef}</span>
               <span style={{ ...fieldStyle, width: 120, color: site.defaultProject === undefined ? '#888' : 'inherit' }}>
@@ -218,17 +257,19 @@ function Loaded(): ReactNode {
             <select
               style={fieldStyle}
               value={draft.provider}
-              onChange={event => setDrafts({
-                ...drafts,
-                [id]: {
-                  ...draft,
-                  provider: event.target.value === 'github' ? 'github' : 'gitlab',
-                  tokenRef: event.target.value === 'github' ? 'GITHUB_TOKEN' : 'GITLAB_TOKEN',
-                },
-              })}
+              onChange={event => {
+                const provider = event.target.value as ProviderId
+                setDrafts({
+                  ...drafts,
+                  [id]: { ...draft, provider, tokenRef: DEFAULT_TOKEN_REFS[provider] },
+                })
+              }}
             >
               <option value="gitlab">GitLab</option>
               <option value="github">GitHub</option>
+              <option value="gitee">Gitee</option>
+              <option value="gitea">Gitea</option>
+              <option value="bitbucket">Bitbucket</option>
             </select>
             <input
               style={{ ...fieldStyle, width: 200 }}
@@ -337,18 +378,21 @@ function Loaded(): ReactNode {
           style={fieldStyle}
           value={newProvider}
           onChange={event => {
-            const provider = event.target.value === 'github' ? 'github' : 'gitlab'
+            const provider = event.target.value as ProviderId
             setNewProvider(provider)
-            setNewBaseUrl(provider === 'github' ? 'https://api.github.com' : '')
-            setNewTokenRef(provider === 'github' ? 'GITHUB_TOKEN' : 'GITLAB_TOKEN')
+            setNewBaseUrl(DEFAULT_BASE_URLS[provider])
+            setNewTokenRef(DEFAULT_TOKEN_REFS[provider])
           }}
         >
           <option value="gitlab">GitLab</option>
           <option value="github">GitHub</option>
+          <option value="gitee">Gitee</option>
+          <option value="gitea">Gitea</option>
+          <option value="bitbucket">Bitbucket</option>
         </select>
         <input
           style={{ ...fieldStyle, width: 200 }}
-          placeholder={newProvider === 'github' ? 'https://api.github.com' : 'GitLab 地址，如 https://gitlab.example.com'}
+          placeholder={BASE_URL_PLACEHOLDERS[newProvider]}
           value={newBaseUrl}
           onChange={event => setNewBaseUrl(event.target.value)}
         />

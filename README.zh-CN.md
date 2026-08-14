@@ -5,7 +5,7 @@
 
 [English](README.md) · 简体中文
 
-[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的独立外挂插件：管理 GitLab 与 GitHub 的 API token，**token 值永不进入大模型的上下文**。
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的独立外挂插件：管理 GitLab、GitHub、Gitee、Gitea 与 Bitbucket 的 API token，**token 值永不进入大模型的上下文**。
 
 模型工具只携带 token 的**引用名**（如 `GITLAB_TOKEN`），每次调用时才从插件自己的加密存储中解密一次，token 只出现在发出的 HTTP 请求头里。修改站点或轮换 token 后下一次调用立即生效，无需重启。
 
@@ -13,7 +13,7 @@
 
 - **token 不进入模型上下文**——工具参数、返回值、错误信息里只有业务数据（`site`、`project`、`path` 等）
 - **磁盘静态加密**——AES-256-GCM 整体加密的数据文件 + 独立的 32 字节随机密钥文件（`0600`、原子写入）
-- **按 provider 限定工具**——`gitlab_*` 只见 GitLab 站点，`github_*` 只见 GitHub 站点；未配置的 site/token 响亮失败并列出合法值
+- **按 provider 限定工具**——`gitlab_*` 只见 GitLab 站点，`github_*` 只见 GitHub 站点，`gitee_*` / `gitea_*` / `bitbucket_*` 同理；未配置的 site/token 响亮失败并列出合法值
 - **Web 设置面板**——添加/编辑/删除站点、写入或清除 token 值；**任何响应都不携带 token 值**，只报配置状态
 - **动态加载/卸载**——运行中的 GUI 直接热挂载/热卸载，无需重启
 - **即时生效**——每次工具调用读一份解密快照，改动和轮换立即生效
@@ -62,7 +62,7 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 
 在 **设置 → Git 凭据** 中管理站点与 token：
 
-- **添加站点**：provider（GitLab / GitHub）、站点 id、API 地址（GitHub 默认 `https://api.github.com`）、token 引用名（默认 `GITLAB_TOKEN` / `GITHUB_TOKEN`）、token 值（可选，可用专属的「保存 Token」按钮单独写入，也可随「添加站点」一并写入）、默认项目（可选）
+- **添加站点**：provider（GitLab / GitHub / Gitee / Gitea / Bitbucket）、站点 id、API 地址（各 provider 默认值：`https://api.github.com`、`https://gitee.com/api/v5`、`https://api.bitbucket.org/2.0`；GitLab 与 Gitea 是自托管，需自己填地址，如 `https://gitlab.example.com` / `https://gitea.example.com/api/v1`）、token 引用名（默认 `GITLAB_TOKEN` / `GITHUB_TOKEN` / `GITEE_TOKEN` / `GITEA_TOKEN` / `BITBUCKET_TOKEN`）、token 值（可选，可用专属的「保存 Token」按钮单独写入，也可随「添加站点」一并写入）、默认项目（可选）
 - **每个已保存的站点**：默认只读展示（provider、地址、tokenRef、默认项目、token 配置状态），点「编辑」才显示文本框与「保存 / 取消」；编辑态可改配置、单独保存或清除 token 值、删除站点
 - 面板通过同源 `/git-credentials-admin/*` JSON 端点读写加密存储；任何响应都不携带 token 值
 - 所有改动即时生效——每次工具调用读一份解密快照
@@ -79,9 +79,21 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 | `github_file` | `site?`、`project`（owner/repo）、`path`、`ref?` | `{ path, ref, content, truncated }` |
 | `github_issues` | `site?`、`project?`、`state?`、`perPage?` | issue 摘要数组（不含 PR） |
 | `github_pull_requests` | `site?`、`project?`、`state?`、`perPage?` | PR 摘要数组 |
+| `gitee_repos` | `site?`、`search?`、`perPage?` | 仓库摘要数组 |
+| `gitee_file` | `site?`、`project`（owner/repo）、`path`、`ref?` | `{ path, ref, content, truncated }` |
+| `gitee_issues` | `site?`、`project?`、`state?`、`perPage?` | issue 摘要数组 |
+| `gitee_pull_requests` | `site?`、`project?`、`state?`、`perPage?` | PR 摘要数组 |
+| `gitea_repos` | `site?`、`search?`、`perPage?` | 仓库摘要数组 |
+| `gitea_file` | `site?`、`project`（owner/repo）、`path`、`ref?` | `{ path, ref, content, truncated }` |
+| `gitea_issues` | `site?`、`project?`、`state?`、`perPage?` | issue 摘要数组 |
+| `gitea_pull_requests` | `site?`、`project?`、`state?`、`perPage?` | PR 摘要数组 |
+| `bitbucket_repos` | `site?`、`search?`、`perPage?` | 仓库摘要数组 |
+| `bitbucket_file` | `site?`、`project`（workspace/repo）、`path`、`ref?` | `{ path, ref, content, truncated }` |
+| `bitbucket_issues` | `site?`、`project?`、`state?`、`perPage?` | issue 摘要数组 |
+| `bitbucket_pull_requests` | `site?`、`project?`、`state?`、`perPage?` | PR 摘要数组 |
 
-- token 引用名是 POSIX 标识符（`GITLAB_TOKEN`、`GITHUB_TOKEN`、`GITLAB_CORP_TOKEN`…），多站点可各配各的 ref，或共享一个 ref
-- GitLab 用 `PRIVATE-TOKEN` 头；GitHub 用 `Authorization: Bearer`（PAT 与 fine-grained token 均可），并带 GitHub 要求的 User-Agent
+- token 引用名是 POSIX 标识符（`GITLAB_TOKEN`、`GITHUB_TOKEN`、`GITEE_TOKEN`、`GITEA_TOKEN`、`BITBUCKET_TOKEN`…），多站点可各配各的 ref，或共享一个 ref
+- GitLab 用 `PRIVATE-TOKEN` 头；GitHub、Gitee、Bitbucket 用 `Authorization: Bearer`（Gitee 在头被拒绝时自动兜底 `access_token` URL 参数）；Gitea 用 `Authorization: token`
 - HTTP 走 Node 内置 `fetch` 直连——刻意不用 `ctx.web.fetch`（只收 URL、无 header）
 
 ## 工作原理
@@ -89,7 +101,7 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 ```
 ~/.dsh/git-credentials.json（AES-256-GCM 加密：站点 + token 值）
   → 工具执行时解密一份快照，按 provider 过滤站点 + resolve(tokenRef)
-  → fetch(baseUrl/api/v4/... 或 api.github.com/..., { headers: { PRIVATE-TOKEN | Bearer } })
+  → fetch(baseUrl/<provider api path>, { headers: { PRIVATE-TOKEN | Bearer | token } })
   → 工具参数/返回值/错误信息里只有 site、project、path 等业务数据
 ```
 
@@ -136,6 +148,9 @@ git-credentials/
   src/http.ts             # 共享 HTTP 助手（token 解析、分页、错误明细）
   src/gitlab.ts           # GitLabClient（PRIVATE-TOKEN 头）
   src/github.ts           # GitHubClient（Bearer 头 + User-Agent）
+  src/gitee.ts            # GiteeClient（Bearer 头，access_token URL 兜底）
+  src/gitea.ts            # GiteaClient（token 头）
+  src/bitbucket.ts        # BitbucketClient（Bearer 头，2.0 API）
   src/admin.ts            # /git-credentials-admin/* 管理端点
   src/invariant.ts        # 不变量伴生（out-of-tree 原因）
   src/client/             # browser half：设置页 Git 凭据分区

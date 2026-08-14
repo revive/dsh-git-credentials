@@ -58,12 +58,19 @@ store.write({
   sites: {
     corp: { provider: 'gitlab', baseUrl: 'https://gitlab.example.com', tokenRef: 'GITLAB_SMOKE_TOKEN' },
     gh: { provider: 'github', baseUrl: 'https://api.github.com', tokenRef: 'GITHUB_SMOKE_TOKEN' },
+    ge: { provider: 'gitee', baseUrl: 'https://gitee.com/api/v5', tokenRef: 'GITEE_SMOKE_TOKEN' },
   },
-  tokens: { GITLAB_SMOKE_TOKEN: 'glpat-smoke-secret', GITHUB_SMOKE_TOKEN: 'ghp-smoke-secret' },
+  tokens: {
+    GITLAB_SMOKE_TOKEN: 'glpat-smoke-secret',
+    GITHUB_SMOKE_TOKEN: 'ghp-smoke-secret',
+    GITEE_SMOKE_TOKEN: 'gitee-smoke-secret',
+  },
 })
 const roundTrip = store.read()
 if (roundTrip.sites.corp?.provider !== 'gitlab' || roundTrip.sites.gh?.provider !== 'github'
-  || roundTrip.tokens['GITHUB_SMOKE_TOKEN'] !== 'ghp-smoke-secret') {
+  || roundTrip.sites.ge?.provider !== 'gitee'
+  || roundTrip.tokens['GITHUB_SMOKE_TOKEN'] !== 'ghp-smoke-secret'
+  || roundTrip.tokens['GITEE_SMOKE_TOKEN'] !== 'gitee-smoke-secret') {
   throw new Error(`store round-trip mismatch: ${JSON.stringify(roundTrip)}`)
 }
 const onDisk = readFileSync(dataPath, 'utf8')
@@ -86,6 +93,9 @@ try {
   for (const name of [
     'gitlab_projects', 'gitlab_file', 'gitlab_merge_requests', 'gitlab_issues',
     'github_repos', 'github_file', 'github_issues', 'github_pull_requests',
+    'gitee_repos', 'gitee_file', 'gitee_issues', 'gitee_pull_requests',
+    'gitea_repos', 'gitea_file', 'gitea_issues', 'gitea_pull_requests',
+    'bitbucket_repos', 'bitbucket_file', 'bitbucket_issues', 'bitbucket_pull_requests',
   ]) {
     if (tools.get(name) === undefined) throw new Error(`tool ${name} is not registered`)
     console.log(`ok: ${name} registered`)

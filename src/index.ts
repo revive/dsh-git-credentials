@@ -1,12 +1,13 @@
 /**
- * The git-credentials plugin: model-facing GitLab and GitHub tools whose
- * tokens never enter the model context. Sites and token values live in the
- * plugin's own encrypted store (AES-256-GCM, separate key file), managed
- * from the Settings → Git 凭据 page through the plugin's own admin routes.
- * Each tool call reads one decrypted snapshot, so editing a site or rotating
- * a token reaches the next call without a restart. The plugin is a pure
- * out-of-tree bolt-on: it uses no product wire channel and mounts/unmounts
- * dynamically through the home-level patch layer.
+ * The git-credentials plugin: model-facing GitLab, GitHub, Gitee, Gitea, and
+ * Bitbucket tools whose tokens never enter the model context. Sites and
+ * token values live in the plugin's own encrypted store (AES-256-GCM,
+ * separate key file), managed from the Settings → Git 凭据 page through the
+ * plugin's own admin routes. Each tool call reads one decrypted snapshot, so
+ * editing a site or rotating a token reaches the next call without a
+ * restart. The plugin is a pure out-of-tree bolt-on: it uses no product wire
+ * channel and mounts/unmounts dynamically through the home-level patch
+ * layer.
  * @module dsh-git-credentials
  */
 
@@ -15,6 +16,9 @@ import Schema from '@deepseek-ai/schemastery'
 import { defineTool, type GenericCallView } from '@deepseek-ai/dsh-tools'
 import { GitLabClient, type GitLabFile, type GitLabListEntry, type GitLabProject } from './gitlab.ts'
 import { GitHubClient, type GitHubEntry, type GitHubFile, type GitHubRepo } from './github.ts'
+import { GiteeClient } from './gitee.ts'
+import { GiteaClient } from './gitea.ts'
+import { BitbucketClient } from './bitbucket.ts'
 import { GitStore, refOf, type ForgeProvider } from './store.ts'
 import { registerGitLabAdmin } from './admin.ts'
 
@@ -98,7 +102,8 @@ export function apply(ctx: Context, config: PluginConfig): void {
   // One operation, one decrypted snapshot: sites and tokens are read per
   // call, so Settings → Git 凭据 changes reach the next call immediately.
   // Tools are provider-scoped: a gitlab tool only sees gitlab sites.
-  const clientFor = (siteArg: string | undefined, tool: string, provider: ForgeProvider): GitLabClient | GitHubClient => {
+  const clientFor = (siteArg: string | undefined, tool: string, provider: ForgeProvider):
+    GitLabClient | GitHubClient | GiteeClient | GiteaClient | BitbucketClient => {
     const state = store.read()
     const candidates = Object.entries(state.sites).filter(([, site]) => site.provider === provider)
     const defaultSiteId = state.defaultSite
@@ -123,7 +128,13 @@ export function apply(ctx: Context, config: PluginConfig): void {
       tokenRef: refOf(site.tokenRef),
       ...site.defaultProject === undefined ? {} : { defaultProject: site.defaultProject },
     }
-    return site.provider === 'github' ? new GitHubClient(state.tokens, base) : new GitLabClient(state.tokens, base)
+    switch (site.provider) {
+      case 'gitlab': return new GitLabClient(state.tokens, base)
+      case 'github': return new GitHubClient(state.tokens, base)
+      case 'gitee': return new GiteeClient(state.tokens, base)
+      case 'gitea': return new GiteaClient(state.tokens, base)
+      case 'bitbucket': return new BitbucketClient(state.tokens, base)
+    }
   }
   const SITE_DESCRIPTION = ' Site ids are managed in Settings → Git 凭据.'
 
@@ -418,4 +429,193 @@ export function apply(ctx: Context, config: PluginConfig): void {
       return client.listPullRequests({ ...args, signal: exec.signal })
     },
   }))
+
+  // Gitee, Gitea, and Bitbucket share one tool shape (repos / file / issues /
+  // pull_requests) with per-provider naming and project vocabulary, so a
+  // small factory registers all three providers' tools from the same
+  // definitions. GitLab and GitHub above stay spelled out: their argument
+  // sets (membership, iid vs number) differ from this uniform shape.
+  interface ForgeClient {
+    listRepos(options: {
+      readonly search?: string
+      readonly perPage?: number
+      readonly signal?: AbortSignal
+    }): Promise<Array<{ path: string; visibility: string; webUrl: string }>>
+    readFile(options: {
+      readonly project: string
+      readonly path: string
+      readonly ref?: string
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    }): Promise<{ path: string; ref: string; content: string; truncated: boolean }>
+    listIssues(options: {
+      readonly project?: string
+      readonly state?: string
+      readonly perPage?: number
+      readonly signal?: AbortSignal
+    }): Promise<Array<{ number: number; title: string; state: string; webUrl: string; authorName: string }>>
+    listPullRequests(options: {
+      readonly project?: string
+      readonly state?: string
+      readonly perPage?: number
+      readonly signal?: AbortSignal
+    }): Promise<Array<{ number: number; title: string; state: string; webUrl: string; authorName: string }>>
+  }
+
+  const registerForgeTools = (
+    prefix: 'gitee' | 'gitea' | 'bitbucket',
+    provider: ForgeProvider,
+    label: string,
+    projectHint: string,
+  ): void => {
+    const named = (kind: string): string => `${prefix}_${kind}`
+    const client = (args: { site?: string }, tool: string): ForgeClient =>
+      clientFor(args.site, tool, provider) as unknown as ForgeClient
+
+    ctx.tools.register(defineTool({
+      name: named('repos'),
+      description: `List or search repositories on ${label}.${SITE_DESCRIPTION}`,
+      parameters: {
+        site: siteParameter,
+        search: { type: 'string', description: 'Filter repositories by name.' },
+        perPage: { type: 'integer', description: 'Maximum number of repositories to return (1-100).' },
+      },
+      output: {
+        schema: { type: 'array', items: repoSchema },
+        render: (_args, repos: Array<{ path: string; visibility: string; webUrl: string }>) => repos.length === 0
+          ? [{ type: 'text', text: 'No repositories found.' }]
+          : [{
+            type: 'text',
+            text: repos.map(repo => `${repo.path} (${repo.visibility}) — ${repo.webUrl}`).join('\n'),
+          }],
+      },
+      presentCall(args): GenericCallView {
+        return {
+          card: 'generic',
+          title: `${label} repositories${args.search === undefined ? '' : ` matching ${args.search}`}`,
+          kind: 'search',
+        }
+      },
+      async execute(args, exec) {
+        return client(args, named('repos')).listRepos({ ...args, signal: exec.signal })
+      },
+    }))
+
+    ctx.tools.register(defineTool({
+      name: named('file'),
+      description: `Read one file from a repository on ${label}.${SITE_DESCRIPTION}`,
+      parameters: {
+        site: siteParameter,
+        project: {
+          type: 'string', required: true,
+          description: `Repository on ${label}, e.g. ${projectHint}.`,
+        },
+        path: {
+          type: 'string', required: true,
+          description: 'File path within the repository, e.g. src/index.ts.',
+        },
+        ref: {
+          type: 'string',
+          description: 'Branch or tag to read from; defaults to the repository default branch.',
+        },
+      },
+      output: {
+        schema: fileSchema,
+        render: (_args, file: { path: string; ref: string; content: string; truncated: boolean }) => [
+          { type: 'text', text: file.truncated ? `(truncated) ${file.path}@${file.ref}` : `${file.path}@${file.ref}` },
+          { type: 'text', text: file.content },
+        ],
+      },
+      presentCall(args): GenericCallView {
+        return {
+          card: 'generic',
+          title: `Read ${args.path}@${args.ref ?? 'default branch'} in ${args.project}`,
+          kind: 'read',
+        }
+      },
+      async execute(args, exec) {
+        return client(args, named('file')).readFile({ ...args, maxBytes: config.fileReadMaxBytes, signal: exec.signal })
+      },
+    }))
+
+    ctx.tools.register(defineTool({
+      name: named('issues'),
+      description: `List issues of one repository on ${label}.${SITE_DESCRIPTION}`,
+      parameters: {
+        site: siteParameter,
+        project: {
+          type: 'string',
+          description: `Repository on ${label}, e.g. ${projectHint}; defaults to the site defaultProject when configured.`,
+        },
+        state: {
+          type: 'string', enum: ['open', 'closed', 'all'],
+          description: 'Filter by state; defaults to open.',
+        },
+        perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
+      },
+      output: {
+        schema: { type: 'array', items: githubEntrySchema },
+        render: (_args, entries: Array<{ number: number; title: string; state: string; webUrl: string; authorName: string }>) =>
+          entries.length === 0
+            ? [{ type: 'text', text: 'No issues found.' }]
+            : [{
+              type: 'text',
+              text: entries.map(entry => `#${entry.number} [${entry.state}] ${entry.title} — ${entry.authorName} — ${entry.webUrl}`)
+                .join('\n'),
+            }],
+      },
+      presentCall(args): GenericCallView {
+        return {
+          card: 'generic',
+          title: `Issues of ${args.project ?? 'default project'}`,
+          kind: 'search',
+        }
+      },
+      async execute(args, exec) {
+        return client(args, named('issues')).listIssues({ ...args, signal: exec.signal })
+      },
+    }))
+
+    ctx.tools.register(defineTool({
+      name: named('pull_requests'),
+      description: `List pull requests of one repository on ${label}.${SITE_DESCRIPTION}`,
+      parameters: {
+        site: siteParameter,
+        project: {
+          type: 'string',
+          description: `Repository on ${label}, e.g. ${projectHint}; defaults to the site defaultProject when configured.`,
+        },
+        state: {
+          type: 'string', enum: ['open', 'closed', 'all'],
+          description: 'Filter by state; defaults to open.',
+        },
+        perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
+      },
+      output: {
+        schema: { type: 'array', items: githubEntrySchema },
+        render: (_args, entries: Array<{ number: number; title: string; state: string; webUrl: string; authorName: string }>) =>
+          entries.length === 0
+            ? [{ type: 'text', text: 'No pull requests found.' }]
+            : [{
+              type: 'text',
+              text: entries.map(entry => `#${entry.number} [${entry.state}] ${entry.title} — ${entry.authorName} — ${entry.webUrl}`)
+                .join('\n'),
+            }],
+      },
+      presentCall(args): GenericCallView {
+        return {
+          card: 'generic',
+          title: `Pull requests of ${args.project ?? 'default project'}`,
+          kind: 'search',
+        }
+      },
+      async execute(args, exec) {
+        return client(args, named('pull_requests')).listPullRequests({ ...args, signal: exec.signal })
+      },
+    }))
+  }
+
+  registerForgeTools('gitee', 'gitee', 'Gitee', 'owner/repo')
+  registerForgeTools('gitea', 'gitea', 'Gitea', 'owner/repo')
+  registerForgeTools('bitbucket', 'bitbucket', 'Bitbucket', 'workspace/repo')
 }

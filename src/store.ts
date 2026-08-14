@@ -32,7 +32,7 @@ export function refOf(value: string): TokenRef {
 }
 
 /** Supported forge providers. */
-export type ForgeProvider = 'gitlab' | 'github'
+export type ForgeProvider = 'gitlab' | 'github' | 'gitee' | 'gitea' | 'bitbucket'
 
 /** One configured site. */
 export interface SiteConfig {

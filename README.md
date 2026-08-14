@@ -5,7 +5,7 @@
 
 [简体中文](README.zh-CN.md)
 
-An out-of-tree plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) that manages GitLab and GitHub API tokens so **token values never enter the model context**.
+An out-of-tree plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) that manages GitLab, GitHub, Gitee, Gitea, and Bitbucket API tokens so **token values never enter the model context**.
 
 The model's tools carry only a token *reference name* (e.g. `GITLAB_TOKEN`); the value is decrypted from the plugin's own encrypted store at call time and appears only in the outgoing HTTP `Authorization` header. Changing a site or rotating a token takes effect on the very next call — no restart required.
 
@@ -13,7 +13,7 @@ The model's tools carry only a token *reference name* (e.g. `GITLAB_TOKEN`); the
 
 - **Tokens stay out of the model context** — never in tool arguments, return values, or error messages; only business data (`site`, `project`, `path`, …) crosses the model boundary
 - **Encrypted at rest** — AES-256-GCM encrypted data file with a separate 32-byte random key file (`0600`, atomic writes)
-- **Per-provider tool scoping** — `gitlab_*` tools only see GitLab sites, `github_*` only GitHub sites; unconfigured sites/tokens fail loud with the valid values listed in the error
+- **Per-provider tool scoping** — `gitlab_*` tools only see GitLab sites, `github_*` only GitHub sites, and likewise for `gitee_*`, `gitea_*`, `bitbucket_*`; unconfigured sites/tokens fail loud with the valid values listed in the error
 - **Web settings panel** — add, edit, and delete sites; store or clear token values; **no response ever carries a token value**, only configured state
 - **Hot load/unload** — mounts and unmounts on a running GUI without restarting it
 - **Instant effect** — each tool call reads a freshly decrypted snapshot, so edits and rotations apply immediately
@@ -62,7 +62,7 @@ The HMR watcher monitors the home layer: adding the row hot-mounts the plugin in
 
 Manage sites and tokens in **Settings → Git Credentials**:
 
-- **Add a site**: provider (GitLab / GitHub), site id, API base URL (GitHub defaults to `https://api.github.com`), token reference name (defaults to `GITLAB_TOKEN` / `GITHUB_TOKEN`), optional token value (write it with the dedicated **Save Token** button, or together with **Add Site**), optional default project
+- **Add a site**: provider (GitLab / GitHub / Gitee / Gitea / Bitbucket), site id, API base URL (defaults per provider: `https://api.github.com`, `https://gitee.com/api/v5`, `https://api.bitbucket.org/2.0`; GitLab and Gitea are self-hosted and need their own address, e.g. `https://gitlab.example.com` / `https://gitea.example.com/api/v1`), token reference name (defaults to `GITLAB_TOKEN` / `GITHUB_TOKEN` / `GITEE_TOKEN` / `GITEA_TOKEN` / `BITBUCKET_TOKEN`), optional token value (write it with the dedicated **Save Token** button, or together with **Add Site**), optional default project
 - **Each existing site**: read-only by default (provider, base URL, token ref, default project, configured state) with an **Edit** button; edit mode reveals the inputs plus **Save / Cancel**, and lets you store or clear the token value, or delete the site
 - The panel talks to same-origin `/git-credentials-admin/*` JSON endpoints; token values never appear in any response
 - All changes take effect immediately — every tool call reads a fresh decrypted snapshot
@@ -79,9 +79,21 @@ Manage sites and tokens in **Settings → Git Credentials**:
 | `github_file` | `site?`, `project` (owner/repo), `path`, `ref?` | `{ path, ref, content, truncated }` |
 | `github_issues` | `site?`, `project?`, `state?`, `perPage?` | issue summary array (PRs excluded) |
 | `github_pull_requests` | `site?`, `project?`, `state?`, `perPage?` | PR summary array |
+| `gitee_repos` | `site?`, `search?`, `perPage?` | repository summary array |
+| `gitee_file` | `site?`, `project` (owner/repo), `path`, `ref?` | `{ path, ref, content, truncated }` |
+| `gitee_issues` | `site?`, `project?`, `state?`, `perPage?` | issue summary array |
+| `gitee_pull_requests` | `site?`, `project?`, `state?`, `perPage?` | PR summary array |
+| `gitea_repos` | `site?`, `search?`, `perPage?` | repository summary array |
+| `gitea_file` | `site?`, `project` (owner/repo), `path`, `ref?` | `{ path, ref, content, truncated }` |
+| `gitea_issues` | `site?`, `project?`, `state?`, `perPage?` | issue summary array |
+| `gitea_pull_requests` | `site?`, `project?`, `state?`, `perPage?` | PR summary array |
+| `bitbucket_repos` | `site?`, `search?`, `perPage?` | repository summary array |
+| `bitbucket_file` | `site?`, `project` (workspace/repo), `path`, `ref?` | `{ path, ref, content, truncated }` |
+| `bitbucket_issues` | `site?`, `project?`, `state?`, `perPage?` | issue summary array |
+| `bitbucket_pull_requests` | `site?`, `project?`, `state?`, `perPage?` | PR summary array |
 
-- Token reference names are POSIX identifiers (`GITLAB_TOKEN`, `GITHUB_TOKEN`, `GITLAB_CORP_TOKEN`, …); multiple sites can share one reference or use their own
-- GitLab authenticates with the `PRIVATE-TOKEN` header; GitHub with `Authorization: Bearer` (PAT and fine-grained tokens both work) plus the User-Agent GitHub requires
+- Token reference names are POSIX identifiers (`GITLAB_TOKEN`, `GITHUB_TOKEN`, `GITEE_TOKEN`, `GITEA_TOKEN`, `BITBUCKET_TOKEN`, …); multiple sites can share one reference or use their own
+- GitLab authenticates with the `PRIVATE-TOKEN` header; GitHub, Gitee, and Bitbucket with `Authorization: Bearer` (Gitee additionally falls back to the `access_token` URL parameter when the header form is rejected); Gitea with `Authorization: token`
 - HTTP goes through Node's built-in `fetch` directly — `ctx.web.fetch` is deliberately not used (URL-only, no header support)
 
 ## How it works
@@ -89,7 +101,7 @@ Manage sites and tokens in **Settings → Git Credentials**:
 ```
 ~/.dsh/git-credentials.json (AES-256-GCM encrypted: sites + token values)
   → tool execution decrypts one snapshot, filters sites by provider, resolves tokenRef
-  → fetch(baseUrl/api/v4/... or api.github.com/..., { headers: { PRIVATE-TOKEN | Bearer } })
+  → fetch(baseUrl/<provider api path>, { headers: { PRIVATE-TOKEN | Bearer | token } })
   → tool arguments/returns/errors carry only business data (site, project, path, …)
 ```
 
@@ -137,6 +149,9 @@ git-credentials/
   src/http.ts             # shared HTTP helpers (token resolution, pagination, error detail)
   src/gitlab.ts           # GitLabClient (PRIVATE-TOKEN header)
   src/github.ts           # GitHubClient (Bearer header + User-Agent)
+  src/gitee.ts            # GiteeClient (Bearer header, access_token URL fallback)
+  src/gitea.ts            # GiteaClient (token header)
+  src/bitbucket.ts        # BitbucketClient (Bearer header, 2.0 API)
   src/admin.ts            # /git-credentials-admin/* management endpoints
   src/invariant.ts        # invariant companion (out-of-tree rationale)
   src/client/             # browser half: the Settings → Git Credentials panel
