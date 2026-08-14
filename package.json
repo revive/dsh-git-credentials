@@ -1,7 +1,6 @@
 {
   "name": "dsh-git-credentials",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
   "description": "Out-of-tree dsh plugin: GitLab and GitHub tokens stay out of the model context, stored encrypted (AES-256-GCM) in a plugin-owned file; the model calls forge API tools on demand, and the web settings page manages sites and tokens.",
   "keywords": [
@@ -27,29 +26,33 @@
     "gen:tsconfig": "node tools/gen-tsconfig.mjs",
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsdown",
-    "smoke": "node --import \"$DSH_REPO/node_modules/tsx/dist/esm/index.mjs\" smoke.ts"
+    "smoke": "node --import \"$DSH_REPO/node_modules/tsx/dist/esm/index.mjs\" smoke.ts",
+    "pack": "pnpm pack"
   },
-  "main": "src/index.ts",
+  "main": "lib/index.js",
   "exports": {
-    ".": "./src/index.ts",
+    ".": "./lib/index.js",
     "./client": "./lib/client.js",
-    "./invariant": "./src/invariant.ts",
+    "./invariant": "./lib/invariant.js",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
-    "lib/client.js",
-    "lib/client.js.map"
+    "lib",
+    "cordis.patch.yml"
   ],
   "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web"
     }
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "0.1.0-rc.5",
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.5",
-    "@deepseek-ai/dsh-schemastery": "0.1.0-rc.5"
+    "@deepseek-ai/cordis": "^4.0.1-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.1-rc.1"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "0.1.0-rc.5",

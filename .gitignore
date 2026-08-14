@@ -11,3 +11,13 @@ tsconfig.json
 # Logs and editor junk
 *.log
 .DS_Store
+
+# Local publish smoke test artifacts (dsh plugin add verification)
+.smoke-home/
+.pnpm-smoke-store/
+
+# Packed tarballs
+*.tgz
+
+# npm cache (local dry-run artifact)
+.npm-cache/

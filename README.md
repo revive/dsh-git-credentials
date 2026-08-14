@@ -118,7 +118,7 @@ pnpm build
 
 - **Composition/config layers** recombine via HMR immediately — no restart
 - **Client bundle** is picked up by the webserver's stat-poll + client-hmr broadcast — rebuild and the browser hot-swaps it
-- **Host plugin source** has no hot path (Node caches modules; the harness has no host-side watch) — restart the process, or rename the plugin directory so module URLs change and hot-swap zero-restart
+- **Host plugin source** has no hot path (Node caches modules; the harness has no host-side watch) — and since the package entry is the built `lib/index.js`, host-side edits need a `pnpm build` before the restart; or rename the plugin directory so module URLs change and hot-swap zero-restart
 
 `$DSH_REPO/node_modules/.bin/tsdown` is a shell shim — run it directly (as `pnpm build` does), not via `node .../.bin/tsdown`.
 
@@ -128,7 +128,7 @@ pnpm build
 git-credentials/
   package.json            # dsh-git-credentials; peers: @deepseek-ai/{cordis,dsh-tools,dsh-schemastery}
                           # dsh.client manifest + exports["./client"] (browser half)
-  cordis.yml              # dev --patch overlay
+  cordis.patch.yml        # bundle patch layer (dsh.bundle.patch) — also the dev --patch overlay
   tsdown.config.ts        # reuses the repo's clientBundle preset to build lib/
   smoke.ts                # keyless boot smoke (incl. encrypted-store round-trip assertions)
   tools/gen-tsconfig.mjs  # regenerates tsconfig.json paths for this checkout (DSH_REPO-driven)
@@ -142,6 +142,22 @@ git-credentials/
   src/client/             # browser half: the Settings → Git Credentials panel
   lib/                    # build output (node half + client bundle, gitignored)
 ```
+
+## Publishing
+
+The package is shaped as a dsh **bundle**: `dsh.bundle.patch` points at `cordis.patch.yml`, so users install it with `dsh plugin --profile <name> add dsh-git-credentials` and it joins the profile's bundle layers. The runtime resolves the plugin's `@deepseek-ai/*` imports from the installation's flat fallback (`$DSH_HOME/profiles/node_modules`), so the peerDependencies declare the **published** version line (`@deepseek-ai/cordis ^4.0.1-rc.1`, `@deepseek-ai/dsh-tools ^0.0.1-rc.1`, `@deepseek-ai/schemastery ^3.18.1-rc.1`) — never the dev-workspace `0.1.0-rc.5` versions.
+
+```sh
+# Build the node half + browser bundle, then publish (requires an npm account)
+DSH_REPO=/path/to/deepseek-harness pnpm build
+npm publish
+
+# Or distribute a tarball without a registry:
+pnpm pack
+dsh plugin --profile <name> add ./dsh-git-credentials-<version>.tgz
+```
+
+Verify a tarball locally before publishing: `dsh plugin --profile <name> add <tarball>`, confirm `dsh --profile <name> --dump-config` shows the `# == dsh-git-credentials` layer, then boot the profile and check the eight tools register.
 
 ## License
 

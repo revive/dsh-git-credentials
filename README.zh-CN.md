@@ -117,7 +117,7 @@ pnpm build
 
 - **组合/配置层**：HMR 自动重组合，改完立即生效
 - **client bundle**：webserver 轮询 + client-hmr 广播，重建后浏览器自动热替换
-- **host 插件源码**：没有热更通道（Node 持有模块缓存，产品自身也没有 host 侧 watch）——重启进程，或用「目录改名」技巧让模块 URL 全变，零重启热生效
+- **host 插件源码**：没有热更通道（Node 持有模块缓存，产品自身也没有 host 侧 watch）；且包入口已是构建产物 `lib/index.js`，host 侧改动需先 `pnpm build` 再重启——或用「目录改名」技巧让模块 URL 全变，零重启热生效
 
 `$DSH_REPO/node_modules/.bin/tsdown` 是 shell 包装脚本——直接执行（`pnpm build` 即如此），不要用 `node .../.bin/tsdown`。
 
@@ -127,7 +127,7 @@ pnpm build
 git-credentials/
   package.json            # dsh-git-credentials；peer: @deepseek-ai/{cordis,dsh-tools,dsh-schemastery}
                           # dsh.client 清单 + exports["./client"]（browser half）
-  cordis.yml              # 开发用 --patch 覆盖层
+  cordis.patch.yml        # bundle 补丁层（dsh.bundle.patch）——同时也是开发用 --patch 覆盖层
   tsdown.config.ts        # 复用仓库 clientBundle 预设构建 lib/
   smoke.ts                # keyless 启动冒烟（含加密存储回读断言）
   tools/gen-tsconfig.mjs  # 重新生成 tsconfig.json paths（DSH_REPO 驱动）
@@ -141,6 +141,22 @@ git-credentials/
   src/client/             # browser half：设置页 Git 凭据分区
   lib/                    # 构建产物（node 半 + client bundle，已 gitignore）
 ```
+
+## 发布
+
+包已按 dsh **bundle** 形态组织：`dsh.bundle.patch` 指向 `cordis.patch.yml`，用户执行 `dsh plugin --profile <name> add dsh-git-credentials` 即可安装并加入 profile 的 bundle 层。运行时通过安装自身的 flat fallback（`$DSH_HOME/profiles/node_modules`）解析插件的 `@deepseek-ai/*` 依赖，因此 peerDependencies 声明的是 **npm 已发布版本线**（`@deepseek-ai/cordis ^4.0.1-rc.1`、`@deepseek-ai/dsh-tools ^0.0.1-rc.1`、`@deepseek-ai/schemastery ^3.18.1-rc.1`）——切勿用开发工作区的 `0.1.0-rc.5` 版本。
+
+```sh
+# 先构建 node 半 + 浏览器 bundle，再发布（需要 npm 账号）
+DSH_REPO=/path/to/deepseek-harness pnpm build
+npm publish
+
+# 或者不打 registry，用 tarball 分发：
+pnpm pack
+dsh plugin --profile <name> add ./dsh-git-credentials-<version>.tgz
+```
+
+发布前先在本地验证 tarball：`dsh plugin --profile <name> add <tarball>`，确认 `dsh --profile <name> --dump-config` 出现 `# == dsh-git-credentials` 层，再 boot profile 检查 8 个工具是否注册。
 
 ## License
 

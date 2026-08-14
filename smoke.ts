@@ -77,7 +77,7 @@ console.log('ok: encrypted store round-trips with ciphertext at rest')
 
 const ctx = await boot('gitlab-smoke', rootConfig, [
   ...loadOverlayPatches('gitlab-smoke', join(REPO, 'packages/bundle/base/cordis.patch.yml')),
-  ...loadOverlayPatches('gitlab-smoke', join(PLUGIN, 'cordis.yml')),
+  ...loadOverlayPatches('gitlab-smoke', join(PLUGIN, 'cordis.patch.yml')),
 ])
 
 try {

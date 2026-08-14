@@ -1,0 +1,9 @@
+# git-credentials bundle layer: inserts the Git credentials plugin into a
+# composition. This file is the `dsh.bundle.patch` of the npm-published
+# bundle — `dsh plugin add dsh-git-credentials` applies it as a layer, and
+# the row references the package by name. The same file doubles as the
+# --patch dev overlay. Sites and tokens are managed in the web UI under
+# 设置 → Git 凭据 (encrypted store) — nothing secret lives here.
+- insert:
+    - id: git-credentials
+      name: 'dsh-git-credentials'

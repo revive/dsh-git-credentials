@@ -1,8 +1,0 @@
-# git-credentials dev overlay: inserts the Git credentials plugin into a
-# composition. The canonical deployment is the home-level layer
-# (~/.dsh/cordis.patch.yml) with the package-name row; this file is the
-# --patch dev form of the same row. Sites and tokens are managed in the web
-# UI under 设置 → Git 凭据 (encrypted store) — nothing secret lives here.
-- insert:
-    - id: git-credentials
-      name: 'dsh-git-credentials'
