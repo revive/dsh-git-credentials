@@ -1,0 +1,13 @@
+# Dependencies
+node_modules/
+
+# Build output (node half + browser bundle; regenerate with `pnpm build`)
+lib/
+
+# Machine-specific generated tsconfig — regenerate for this checkout with
+# `pnpm gen:tsconfig` (requires DSH_REPO)
+tsconfig.json
+
+# Logs and editor junk
+*.log
+.DS_Store

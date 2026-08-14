@@ -1,0 +1,254 @@
+/**
+ * GitHub REST API client for the git-credentials plugin: one configured site
+ * per client, token values taken from the plugin's own encrypted store
+ * snapshot. The token enters only the `Authorization` header; GitHub also
+ * requires a User-Agent, which this module supplies. One operation, one
+ * decrypted state.
+ * @module git-github
+ */
+
+import { errorDetail, errorMessage, pageSize, tokenFor, type AuthedSite } from './http.ts'
+
+/** A repository summary as GitHub's API returns it. */
+export interface GitHubRepo {
+  readonly id: number
+  /** `owner/name`, the path Git tooling expects. */
+  readonly path: string
+  readonly name: string
+  readonly webUrl: string
+  readonly visibility: string
+}
+
+/** One issue or pull request entry. */
+export interface GitHubEntry {
+  readonly number: number
+  readonly title: string
+  readonly state: string
+  readonly webUrl: string
+  readonly authorName: string
+}
+
+/** A repository file read through the GitHub API. */
+export interface GitHubFile {
+  readonly path: string
+  readonly ref: string
+  readonly content: string
+  readonly truncated: boolean
+}
+
+/** Issue states GitHub accepts. */
+export type GitHubIssueState = 'open' | 'closed' | 'all'
+
+/** Pull-request states GitHub accepts. */
+export type GitHubPullState = 'open' | 'closed' | 'all'
+
+/** Raw repository entry. */
+interface RawRepo {
+  readonly id: number
+  readonly full_name: string
+  readonly name: string
+  readonly html_url: string
+  readonly visibility: string
+}
+
+/** Raw issue / pull-request entry; issues list entries carry `pull_request` when they are PRs. */
+interface RawEntry {
+  readonly number: number
+  readonly title: string
+  readonly state: string
+  readonly html_url: string
+  readonly user: { readonly login: string } | null
+  readonly pull_request?: unknown
+}
+
+/** Raw file entry. */
+interface RawFile {
+  readonly encoding?: string
+  readonly content?: string
+}
+
+/** Split `owner/repo` into two path segments; fails loud on a malformed argument. */
+function splitProject(siteId: string, project: string): [string, string] {
+  const parts = project.split('/')
+  if (parts.length !== 2 || parts[0] === '' || parts[1] === '') {
+    throw new Error(`site "${siteId}": project must be "owner/repo", got ${JSON.stringify(project)}`)
+  }
+  return [parts[0]!, parts[1]!]
+}
+
+/**
+ * Authenticated GitHub REST API client. One instance per call, built from
+ * one store snapshot.
+ */
+export class GitHubClient {
+  constructor(
+    private readonly tokens: Readonly<Record<string, string>>,
+    readonly site: AuthedSite,
+  ) {}
+
+  /**
+   * List repositories of the token owner, optionally by name search.
+   * @param options - search text, page size, cancellation.
+   * @returns repository summaries.
+   */
+  async listRepos(options: {
+    readonly search?: string
+    readonly perPage?: number
+    readonly signal?: AbortSignal
+  }): Promise<GitHubRepo[]> {
+    const raw = options.search === undefined || options.search === ''
+      ? await this.get<RawRepo[]>('/user/repos', {
+        params: { per_page: pageSize(options.perPage) },
+        ...options.signal === undefined ? {} : { signal: options.signal },
+      })
+      : (await this.get<{ items: RawRepo[] }>('/search/repositories', {
+        params: { q: `${options.search} in:name`, per_page: pageSize(options.perPage) },
+        ...options.signal === undefined ? {} : { signal: options.signal },
+      })).items
+    return raw.map(repo => ({
+      id: repo.id,
+      path: repo.full_name,
+      name: repo.name,
+      webUrl: repo.html_url,
+      visibility: repo.visibility,
+    }))
+  }
+
+  /**
+   * Read one repository file at a ref; the default branch when the ref is
+   * omitted. Content beyond `maxBytes` is cut and flagged.
+   * @param options - project, file path, ref, byte cap, cancellation.
+   * @returns the decoded file content.
+   */
+  async readFile(options: {
+    readonly project: string
+    readonly path: string
+    readonly ref?: string
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<GitHubFile> {
+    const [owner, repo] = splitProject(this.site.id, options.project)
+    const ref = options.ref ?? (await this.defaultBranch(owner, repo, options.signal))
+    const raw = await this.get<RawFile | unknown[]>(
+      `/repos/${owner}/${repo}/contents/${encodePath(options.path)}`,
+      { params: { ref }, ...options.signal === undefined ? {} : { signal: options.signal } },
+    )
+    if (Array.isArray(raw)) {
+      throw new Error(`site "${this.site.id}": ${options.path} is a directory, not a file`)
+    }
+    if (raw.encoding !== 'base64' || raw.content === undefined) {
+      throw new Error(`site "${this.site.id}": ${options.path} has an unexpected content encoding`)
+    }
+    const content = Buffer.from(raw.content, 'base64').toString('utf8')
+    const truncated = content.length > options.maxBytes
+    return {
+      path: options.path,
+      ref,
+      content: truncated ? content.slice(0, options.maxBytes) : content,
+      truncated,
+    }
+  }
+
+  /**
+   * List issues of one repository (pull requests excluded).
+   * @param options - project (site default when omitted), state, page size, cancellation.
+   * @returns issue summaries.
+   */
+  async listIssues(options: {
+    readonly project?: string
+    readonly state?: GitHubIssueState
+    readonly perPage?: number
+    readonly signal?: AbortSignal
+  }): Promise<GitHubEntry[]> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.get<RawEntry[]>(`/repos/${owner}/${repo}/issues`, {
+      params: { state: options.state ?? 'open', per_page: pageSize(options.perPage) },
+      ...options.signal === undefined ? {} : { signal: options.signal },
+    })
+    return raw.filter(entry => entry.pull_request === undefined).map(mapEntry)
+  }
+
+  /**
+   * List pull requests of one repository.
+   * @param options - project (site default when omitted), state, page size, cancellation.
+   * @returns pull-request summaries.
+   */
+  async listPullRequests(options: {
+    readonly project?: string
+    readonly state?: GitHubPullState
+    readonly perPage?: number
+    readonly signal?: AbortSignal
+  }): Promise<GitHubEntry[]> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.get<RawEntry[]>(`/repos/${owner}/${repo}/pulls`, {
+      params: { state: options.state ?? 'open', per_page: pageSize(options.perPage) },
+      ...options.signal === undefined ? {} : { signal: options.signal },
+    })
+    return raw.map(mapEntry)
+  }
+
+  /** The repository's default branch name. */
+  private async defaultBranch(owner: string, repo: string, signal?: AbortSignal): Promise<string> {
+    const raw = await this.get<{ readonly default_branch: string }>(
+      `/repos/${owner}/${repo}`,
+      signal === undefined ? {} : { signal },
+    )
+    return raw.default_branch
+  }
+
+  /** One authenticated GET against the GitHub REST API. */
+  private async get<T>(path: string, options: {
+    readonly params?: Record<string, string | undefined>
+    readonly signal?: AbortSignal
+  }): Promise<T> {
+    const token = tokenFor(this.tokens, this.site)
+    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    for (const [key, value] of Object.entries(options.params ?? {})) {
+      if (value !== undefined) url.searchParams.set(key, value)
+    }
+    let response: Response
+    try {
+      response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'dsh-git-credentials',
+        },
+        ...options.signal === undefined ? {} : { signal: options.signal },
+      })
+    } catch (error) {
+      throw new Error(`site "${this.site.id}": request to ${path} failed: ${errorMessage(error)}`)
+    }
+    if (!response.ok) {
+      const detail = await errorDetail(response)
+      const hint = response.status === 401
+        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        : ''
+      throw new Error(`site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
+    }
+    return (await response.json()) as T
+  }
+
+  /** The project to list; explicit argument wins, then the site default; otherwise fail loud. */
+  private resolveProject(project: string | undefined): string {
+    if (project !== undefined) return project
+    if (this.site.defaultProject !== undefined) return this.site.defaultProject
+    throw new Error(`site "${this.site.id}": a project argument is required when the site declares no defaultProject`)
+  }
+}
+
+/** Map one raw issue/PR entry to the canonical summary. */
+function mapEntry(entry: RawEntry): GitHubEntry {
+  return {
+    number: entry.number,
+    title: entry.title,
+    state: entry.state,
+    webUrl: entry.html_url,
+    authorName: entry.user?.login ?? 'unknown',
+  }
+}
+
+/** URL-encode one file path for the contents endpoint (slashes preserved as segments). */
+function encodePath(path: string): string {
+  return path.split('/').map(segment => encodeURIComponent(segment)).join('/')
+}
