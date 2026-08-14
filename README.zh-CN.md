@@ -18,6 +18,20 @@
 - **动态加载/卸载**——运行中的 GUI 直接热挂载/热卸载，无需重启
 - **即时生效**——每次工具调用读一份解密快照，改动和轮换立即生效
 
+## 为什么不用 MCP server？
+
+GitHub 发布了官方 MCP server，harness 也原生支持 MCP 客户端——如果只需要 GitHub，接入官方 MCP server 是更主流的选择，本插件的 `github_*` 工具确实与它功能重叠。
+
+本插件的价值在 MCP 覆盖不到的地方：
+
+| | 官方 GitHub MCP | 本插件 |
+|---|---|---|
+| 覆盖平台 | 只有 GitHub（GitLab 有官方 server；Gitee / Gitea / Bitbucket 依赖第三方 server，质量与维护参差） | 一个加密存储、一个设置面板、一套工具管 GitLab、GitHub、Gitee、Gitea、Bitbucket——含自托管 Gitea / GitLab |
+| token 处理 | 每台 server 环境变量明文配置，无管理界面 | AES-256-GCM 加密存储 + token 引用名 + 设置页管理；token 值永不进入模型上下文 |
+| 集成形态 | 多一层 MCP 代理进程 | 工具直接注册进 harness 工具注册表 |
+
+单一托管平台 + 标准 token 处理，走 MCP 即可；多 forge（尤其是 Gitee、自托管 Gitea）、或想要加密存储 + 产品内管理页面时，用本插件。
+
 ## 安全模型
 
 ### 存储

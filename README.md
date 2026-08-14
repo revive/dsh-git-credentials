@@ -18,6 +18,20 @@ The model's tools carry only a token *reference name* (e.g. `GITLAB_TOKEN`); the
 - **Hot load/unload** — mounts and unmounts on a running GUI without restarting it
 - **Instant effect** — each tool call reads a freshly decrypted snapshot, so edits and rotations apply immediately
 
+## Why not just an MCP server?
+
+GitHub publishes an official MCP server, and the harness supports MCP clients natively — for GitHub-only automation, wiring up the official MCP server is the mainstream choice, and this plugin's `github_*` tools do overlap with it.
+
+This plugin earns its place where MCP servers don't cover the gap:
+
+| | Official GitHub MCP | This plugin |
+|---|---|---|
+| Forges | GitHub only (GitLab has an official server; Gitee / Gitea / Bitbucket rely on third-party servers of varying quality and maintenance) | One encrypted store, one settings panel, one tool set for GitLab, GitHub, Gitee, Gitea, and Bitbucket — including self-hosted Gitea / GitLab |
+| Token handling | Plaintext environment variables per server, no management UI | AES-256-GCM encrypted storage, token reference names, settings-page management; token values never enter the model context |
+| Integration | Extra MCP proxy process | Tools register directly in the harness tool registry |
+
+Use the MCP route for a single hosted forge with standard token handling; use this plugin for multi-forge setups (especially Gitee or self-hosted Gitea), or when you want encrypted storage plus an in-product management page.
+
 ## Security model
 
 ### Storage
