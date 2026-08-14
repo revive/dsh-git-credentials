@@ -51,6 +51,22 @@ GitHub 发布了官方 MCP server，harness 也原生支持 MCP 客户端——�
 
 ## 安装
 
+### 方式 A：安装 release tarball（推荐）
+
+从 [releases 页面](https://github.com/revive/dsh-git-credentials/releases) 下载 `dsh-git-credentials-<version>.tgz`——tarball 自带构建好的浏览器 bundle，无需 harness 检出、无需构建——然后用 `dsh` CLI 装进 profile：
+
+```sh
+dsh plugin --profile <name> add ./dsh-git-credentials-0.1.0.tgz
+```
+
+首次使用会初始化 profile、pnpm 链接包，`dsh` 自动把插件追加进 profile 的 bundle 层。不 boot 先验证层：
+
+```sh
+dsh --profile <name> --dump-config    # 找 "# == dsh-git-credentials"
+```
+
+### 方式 B：从源码检出安装
+
 插件是纯外挂，产品代码零改动，`~/.dsh` 下只需两处：
 
 1. 符号链接插件目录，让所有 profile 都能解析包名：
@@ -70,7 +86,7 @@ GitHub 发布了官方 MCP server，harness 也原生支持 MCP 客户端——�
 
 HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效），删行 / `disabled: true` = 热卸载，改配置 = 热重配。卸载即删掉这两处。
 
-> 浏览器半（`lib/client.js`）是构建产物——克隆后先构建（见[开发](#开发)）。
+> 浏览器半（`lib/client.js`）是构建产物——克隆后先构建（见[开发](#开发)）；release tarball 已包含构建产物。
 
 ## 用法
 
@@ -175,15 +191,21 @@ git-credentials/
 
 包已按 dsh **bundle** 形态组织：`dsh.bundle.patch` 指向 `cordis.patch.yml`，用户执行 `dsh plugin --profile <name> add dsh-git-credentials` 即可安装并加入 profile 的 bundle 层。运行时通过安装自身的 flat fallback（`$DSH_HOME/profiles/node_modules`）解析插件的 `@deepseek-ai/*` 依赖，因此 peerDependencies 声明的是 **npm 已发布版本线**（`@deepseek-ai/cordis ^4.0.1-rc.1`、`@deepseek-ai/dsh-tools ^0.0.1-rc.1`、`@deepseek-ai/schemastery ^3.18.1-rc.1`）——切勿用开发工作区的 `0.1.0-rc.5` 版本。
 
-```sh
-# 先构建 node 半 + 浏览器 bundle，再发布（需要 npm 账号）
-DSH_REPO=/path/to/deepseek-harness pnpm build
-npm publish
+**每个 GitHub release 都会附带打包好的 tarball**——这是当前的分发渠道（npm 发布因账号 2FA 暂缓）。发布流程：
 
-# 或者不打 registry，用 tarball 分发：
-pnpm pack
+```sh
+# 先构建 node 半 + 浏览器 bundle，再打包
+DSH_REPO=/path/to/deepseek-harness pnpm build
+pnpm pack                       # -> dsh-git-credentials-<version>.tgz
+```
+
+把 tarball 挂到 release（或本地直接安装）：
+
+```sh
 dsh plugin --profile <name> add ./dsh-git-credentials-<version>.tgz
 ```
+
+将来 npm 账号可用后，同一份 tarball 内容用 `npm publish --registry=https://registry.npmjs.org/` 发布，用户即可改用 `dsh plugin add dsh-git-credentials`。
 
 发布前先在本地验证 tarball：`dsh plugin --profile <name> add <tarball>`，确认 `dsh --profile <name> --dump-config` 出现 `# == dsh-git-credentials` 层，再 boot profile 检查 8 个工具是否注册。
 

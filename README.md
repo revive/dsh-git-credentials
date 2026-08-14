@@ -51,6 +51,22 @@ Losing the key file means the data is unrecoverable (decryption fails loud and r
 
 ## Installation
 
+### Option A: install the release tarball (recommended)
+
+Download `dsh-git-credentials-<version>.tgz` from the [releases page](https://github.com/revive/dsh-git-credentials/releases) — the tarball ships the built browser bundle, so no harness checkout or build step is needed — then install it into a profile with the `dsh` CLI:
+
+```sh
+dsh plugin --profile <name> add ./dsh-git-credentials-0.1.0.tgz
+```
+
+The first use initializes the profile, pnpm links the package, and `dsh` appends the plugin to the profile's bundle layers. Verify the layer without booting:
+
+```sh
+dsh --profile <name> --dump-config    # look for "# == dsh-git-credentials"
+```
+
+### Option B: install from a source checkout
+
 The plugin is a pure add-on — zero changes to harness code. Two entries under `~/.dsh` are enough:
 
 1. Symlink the plugin directory so every profile can resolve the package:
@@ -70,7 +86,7 @@ The plugin is a pure add-on — zero changes to harness code. Two entries under 
 
 The HMR watcher monitors the home layer: adding the row hot-mounts the plugin into a running GUI, removing it (or `disabled: true`) hot-unmounts it, and config edits hot-reconfigure it. Uninstalling = removing both entries.
 
-> The browser half (`lib/client.js`) is a build artifact — after cloning, build it first (see [Development](#development)).
+> The browser half (`lib/client.js`) is a build artifact — after cloning, build it first (see [Development](#development)). The release tarball already contains it.
 
 ## Usage
 
@@ -176,15 +192,21 @@ git-credentials/
 
 The package is shaped as a dsh **bundle**: `dsh.bundle.patch` points at `cordis.patch.yml`, so users install it with `dsh plugin --profile <name> add dsh-git-credentials` and it joins the profile's bundle layers. The runtime resolves the plugin's `@deepseek-ai/*` imports from the installation's flat fallback (`$DSH_HOME/profiles/node_modules`), so the peerDependencies declare the **published** version line (`@deepseek-ai/cordis ^4.0.1-rc.1`, `@deepseek-ai/dsh-tools ^0.0.1-rc.1`, `@deepseek-ai/schemastery ^3.18.1-rc.1`) — never the dev-workspace `0.1.0-rc.5` versions.
 
-```sh
-# Build the node half + browser bundle, then publish (requires an npm account)
-DSH_REPO=/path/to/deepseek-harness pnpm build
-npm publish
+**Every GitHub release attaches the packed tarball** — that is the current distribution channel (npm publication is pending account 2FA). A release is produced like this:
 
-# Or distribute a tarball without a registry:
-pnpm pack
+```sh
+# Build the node half + browser bundle, then pack
+DSH_REPO=/path/to/deepseek-harness pnpm build
+pnpm pack                       # -> dsh-git-credentials-<version>.tgz
+```
+
+Attach the tarball to the release (or install it locally):
+
+```sh
 dsh plugin --profile <name> add ./dsh-git-credentials-<version>.tgz
 ```
+
+Once an npm account is available, publish the same tarball contents with `npm publish --registry=https://registry.npmjs.org/`, and users switch to `dsh plugin add dsh-git-credentials`.
 
 Verify a tarball locally before publishing: `dsh plugin --profile <name> add <tarball>`, confirm `dsh --profile <name> --dump-config` shows the `# == dsh-git-credentials` layer, then boot the profile and check the eight tools register.
 
