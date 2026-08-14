@@ -65,6 +65,8 @@ The first use initializes the profile, pnpm links the package, and `dsh` appends
 dsh --profile <name> --dump-config    # look for "# == dsh-git-credentials"
 ```
 
+> Installing a bundle does **not** hot-mount into a running GUI: bundle layers are composed at boot (HMR hot-applies only patch files), so restart the GUI process after `dsh plugin add`. After the restart, the plugin appears under **Settings → Git Credentials**.
+
 ### Option B: install from a source checkout
 
 The plugin is a pure add-on — zero changes to harness code. Two entries under `~/.dsh` are enough:

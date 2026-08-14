@@ -65,6 +65,8 @@ dsh plugin --profile <name> add ./dsh-git-credentials-0.1.0.tgz
 dsh --profile <name> --dump-config    # 找 "# == dsh-git-credentials"
 ```
 
+> 安装 bundle **不会**热挂载到运行中的 GUI：bundle 层在启动时组合（HMR 只热应用 patch 文件），`dsh plugin add` 之后必须**重启 GUI 进程**。重启后在 **设置 → Git 凭据** 即可看到插件分区。
+
 ### 方式 B：从源码检出安装
 
 插件是纯外挂，产品代码零改动，`~/.dsh` 下只需两处：
