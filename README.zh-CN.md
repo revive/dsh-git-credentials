@@ -56,7 +56,7 @@ GitHub 发布了官方 MCP server，harness 也原生支持 MCP 客户端——�
 从 [releases 页面](https://github.com/revive/dsh-git-credentials/releases) 下载 `dsh-git-credentials-<version>.tgz`——tarball 自带构建好的浏览器 bundle，无需 harness 检出、无需构建——然后用 `dsh` CLI 装进 profile：
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.1.0.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.1.1.tgz
 ```
 
 首次使用会初始化 profile、pnpm 链接包，`dsh` 自动把插件追加进 profile 的 bundle 层。不 boot 先验证层：
@@ -172,7 +172,7 @@ git-credentials/
   package.json            # dsh-git-credentials；peer: @deepseek-ai/{cordis,dsh-tools,dsh-schemastery}
                           # dsh.client 清单 + exports["./client"]（browser half）
   cordis.patch.yml        # bundle 补丁层（dsh.bundle.patch）——同时也是开发用 --patch 覆盖层
-  tsdown.config.ts        # 复用仓库 clientBundle 预设构建 lib/
+  tsdown.config.ts        # 自包含构建（node 半 + 浏览器 bundle，不依赖 harness 检出）
   smoke.ts                # keyless 启动冒烟（含加密存储回读断言）
   tools/gen-tsconfig.mjs  # 重新生成 tsconfig.json paths（DSH_REPO 驱动）
   src/index.ts            # 插件入口：8 个工具注册 + 管理路由接线
@@ -196,8 +196,8 @@ git-credentials/
 **每个 GitHub release 都会附带打包好的 tarball**——这是当前的分发渠道（npm 发布因账号 2FA 暂缓）。发布流程：
 
 ```sh
-# 先构建 node 半 + 浏览器 bundle，再打包
-DSH_REPO=/path/to/deepseek-harness pnpm build
+# 先构建 node 半 + 浏览器 bundle（自包含，不需要 harness 检出），再打包
+pnpm build
 pnpm pack                       # -> dsh-git-credentials-<version>.tgz
 ```
 

@@ -143,7 +143,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
   ctx.tools.register(defineTool({
     name: 'gitlab_projects',
-    description: `List or search projects on a self-hosted GitLab.${SITE_DESCRIPTION}`,
+    description: `List or search projects on GitLab (self-hosted or gitlab.com). Use when the user references a GitLab repository or project and you need its path (group/subgroup/project) — the token is injected per site and never enters the model context.${SITE_DESCRIPTION}`,
     parameters: {
       site: siteParameter,
       search: { type: 'string', description: 'Filter projects whose name or path contains this text.' },
@@ -174,7 +174,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
   ctx.tools.register(defineTool({
     name: 'gitlab_file',
-    description: `Read one file from a repository on a self-hosted GitLab.${SITE_DESCRIPTION}`,
+    description: `Read one file from a GitLab project. Use whenever an answer may live in a GitLab repository the user mentions — the token is injected automatically and never appears in the model context.${SITE_DESCRIPTION}`,
     parameters: {
       site: siteParameter,
       project: {
@@ -212,7 +212,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
   ctx.tools.register(defineTool({
     name: 'gitlab_merge_requests',
-    description: `List merge requests of one project on a self-hosted GitLab.${SITE_DESCRIPTION}`,
+    description: `List merge requests of a GitLab project. Use when the user references an MR, a code review, or asks about open/merged changes — the token is injected per site.${SITE_DESCRIPTION}`,
     parameters: {
       site: siteParameter,
       project: {
@@ -250,7 +250,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
   ctx.tools.register(defineTool({
     name: 'gitlab_issues',
-    description: `List issues of one project on a self-hosted GitLab.${SITE_DESCRIPTION}`,
+    description: `List issues of a GitLab project. Use when the user references a GitLab issue or asks about open issues — the token is injected per site.${SITE_DESCRIPTION}`,
     parameters: {
       site: siteParameter,
       project: {
@@ -288,7 +288,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
   ctx.tools.register(defineTool({
     name: 'github_repos',
-    description: `List or search repositories on GitHub.${SITE_DESCRIPTION}`,
+    description: `List or search GitHub repositories. Use to discover or locate a repository (owner/repo) by name before reading files or listing issues/PRs from it — the token is injected per site.${SITE_DESCRIPTION}`,
     parameters: {
       site: siteParameter,
       search: { type: 'string', description: 'Filter repositories by name.' },
@@ -318,7 +318,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
   ctx.tools.register(defineTool({
     name: 'github_file',
-    description: `Read one file from a repository on GitHub.${SITE_DESCRIPTION}`,
+    description: `Read one file from a GitHub repository the token can access (public or private). Use whenever an answer may live in a GitHub repo the user mentions — the token is injected automatically and never enters the model context.${SITE_DESCRIPTION}`,
     parameters: {
       site: siteParameter,
       project: {
@@ -356,7 +356,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
   ctx.tools.register(defineTool({
     name: 'github_issues',
-    description: `List issues of one repository on GitHub (pull requests excluded).${SITE_DESCRIPTION}`,
+    description: `List issues of a GitHub repository (pull requests excluded). Use when the user references a GitHub issue or wants open issues — the token is injected per site.${SITE_DESCRIPTION}`,
     parameters: {
       site: siteParameter,
       project: {
@@ -394,7 +394,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
   ctx.tools.register(defineTool({
     name: 'github_pull_requests',
-    description: `List pull requests of one repository on GitHub.${SITE_DESCRIPTION}`,
+    description: `List pull requests of a GitHub repository. Use when the user references a PR, a code review, or asks about open/closed PRs — the token is injected per site.${SITE_DESCRIPTION}`,
     parameters: {
       site: siteParameter,
       project: {
@@ -474,7 +474,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
     ctx.tools.register(defineTool({
       name: named('repos'),
-      description: `List or search repositories on ${label}.${SITE_DESCRIPTION}`,
+      description: `List or search repositories on ${label}. Use to locate a repository (${projectHint}) by name before reading files or listing issues/PRs from it — the token is injected per site.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
         search: { type: 'string', description: 'Filter repositories by name.' },
@@ -503,7 +503,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
     ctx.tools.register(defineTool({
       name: named('file'),
-      description: `Read one file from a repository on ${label}.${SITE_DESCRIPTION}`,
+      description: `Read one file from a ${label} repository. Use whenever an answer may live in a ${label} repo the user mentions — the token is injected automatically and never enters the model context.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
         project: {
@@ -540,7 +540,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
     ctx.tools.register(defineTool({
       name: named('issues'),
-      description: `List issues of one repository on ${label}.${SITE_DESCRIPTION}`,
+      description: `List issues of a ${label} repository. Use when the user references an issue or asks about open issues — the token is injected per site.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
         project: {
@@ -578,7 +578,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
     ctx.tools.register(defineTool({
       name: named('pull_requests'),
-      description: `List pull requests of one repository on ${label}.${SITE_DESCRIPTION}`,
+      description: `List pull requests of a ${label} repository. Use when the user references a PR, a code review, or asks about open/closed PRs — the token is injected per site.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
         project: {

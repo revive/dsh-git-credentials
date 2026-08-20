@@ -56,7 +56,7 @@ Losing the key file means the data is unrecoverable (decryption fails loud and r
 Download `dsh-git-credentials-<version>.tgz` from the [releases page](https://github.com/revive/dsh-git-credentials/releases) — the tarball ships the built browser bundle, so no harness checkout or build step is needed — then install it into a profile with the `dsh` CLI:
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.1.0.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.1.1.tgz
 ```
 
 The first use initializes the profile, pnpm links the package, and `dsh` appends the plugin to the profile's bundle layers. Verify the layer without booting:
@@ -173,7 +173,7 @@ git-credentials/
   package.json            # dsh-git-credentials; peers: @deepseek-ai/{cordis,dsh-tools,dsh-schemastery}
                           # dsh.client manifest + exports["./client"] (browser half)
   cordis.patch.yml        # bundle patch layer (dsh.bundle.patch) — also the dev --patch overlay
-  tsdown.config.ts        # reuses the repo's clientBundle preset to build lib/
+  tsdown.config.ts        # self-contained build (node half + browser bundle, no harness checkout)
   smoke.ts                # keyless boot smoke (incl. encrypted-store round-trip assertions)
   tools/gen-tsconfig.mjs  # regenerates tsconfig.json paths for this checkout (DSH_REPO-driven)
   src/index.ts            # plugin entry: 8 tool registrations + admin route wiring
@@ -197,8 +197,9 @@ The package is shaped as a dsh **bundle**: `dsh.bundle.patch` points at `cordis.
 **Every GitHub release attaches the packed tarball** — that is the current distribution channel (npm publication is pending account 2FA). A release is produced like this:
 
 ```sh
-# Build the node half + browser bundle, then pack
-DSH_REPO=/path/to/deepseek-harness pnpm build
+# Build the node half + browser bundle (self-contained, no harness checkout
+# needed), then pack
+pnpm build
 pnpm pack                       # -> dsh-git-credentials-<version>.tgz
 ```
 
