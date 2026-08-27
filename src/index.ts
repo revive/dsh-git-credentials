@@ -483,8 +483,15 @@ export function apply(ctx: Context, config: PluginConfig): void {
         perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
         number: { type: 'integer', description: 'PR/MR number (required for merge/close).' },
         title: { type: 'string', description: 'PR/MR title (required for create).' },
-        head: { type: 'string', description: 'Head/source branch (required for create).' },
-        base: { type: 'string', description: 'Base/target branch, often main or master (required for create).' },
+        ...(spec.gitlabExtras === true
+          ? {
+            sourceBranch: { type: 'string', description: 'Source branch (the changes) (required for create).' },
+            targetBranch: { type: 'string', description: 'Target branch, often main or master (required for create).' },
+          }
+          : {
+            head: { type: 'string', description: 'Head/source branch (required for create).' },
+            base: { type: 'string', description: 'Base/target branch, often main or master (required for create).' },
+          }),
         body: { type: 'string', description: 'PR/MR description (Markdown).' },
       },
       output: {
@@ -503,15 +510,26 @@ export function apply(ctx: Context, config: PluginConfig): void {
         switch (args.action ?? 'list') {
           case 'list':
             return c.listPullRequests({ ...(args.project === undefined ? {} : { project: args.project }), ...(args.state === undefined ? {} : { state: args.state }), ...(args.perPage === undefined ? {} : { perPage: args.perPage }), signal: exec.signal })
-          case 'create':
-            return [await c.createPullRequest({
+          case 'create': {
+            // GitLab spells the branches sourceBranch/targetBranch; the others use head/base.
+            const branches = spec.gitlabExtras === true
+              ? {
+                sourceBranch: needString(args as Record<string, unknown>, 'sourceBranch', named(pullsKind)),
+                targetBranch: needString(args as Record<string, unknown>, 'targetBranch', named(pullsKind)),
+              }
+              : {
+                head: needString(args as Record<string, unknown>, 'head', named(pullsKind)),
+                base: needString(args as Record<string, unknown>, 'base', named(pullsKind)),
+              }
+            const pullInput: Record<string, unknown> = {
               ...(args.project === undefined ? {} : { project: args.project }),
               title: needString(args, 'title', named(pullsKind)),
-              head: needString(args, 'head', named(pullsKind)),
-              base: needString(args, 'base', named(pullsKind)),
+              ...branches,
               ...(args.body === undefined ? {} : { body: args.body }),
               signal: exec.signal,
-            })]
+            }
+            return [await c.createPullRequest(pullInput as unknown as Parameters<ForgeClient['createPullRequest']>[0])]
+          }
           case 'merge':
             return [await c.mergePull({ ...(args.project === undefined ? {} : { project: args.project }), number: needNumber(args, named(pullsKind)), signal: exec.signal })]
           case 'close':
