@@ -18,6 +18,10 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { boot, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
 import { GitLabClient } from './src/gitlab.ts'
+import { GitHubClient } from './src/github.ts'
+import { GiteeClient } from './src/gitee.ts'
+import { GiteaClient } from './src/gitea.ts'
+import { BitbucketClient } from './src/bitbucket.ts'
 import { GitStore, refOf } from './src/store.ts'
 
 // The harness checkout comes from the environment, never from a baked-in
@@ -101,6 +105,24 @@ try {
     console.log(`ok: ${name} registered`)
   }
 
+  // The forge surface contract: every client must expose every method the
+  // tool factory dispatches to — a missing method would otherwise surface at
+  // call time as "X is not a function" instead of failing the smoke.
+  const SURFACE = [
+    'listRepos', 'readFile', 'listIssues', 'listPullRequests',
+    'createRepo', 'createIssue', 'createPullRequest',
+    'closeIssue', 'reopenIssue', 'commentIssue', 'mergePull', 'closePull',
+  ] as const
+  for (const ctor of [GitLabClient, GitHubClient, GiteeClient, GiteaClient, BitbucketClient]) {
+    const probe = Object.create(ctor.prototype) as Record<string, unknown>
+    for (const method of SURFACE) {
+      if (typeof probe[method] !== 'function') {
+        throw new Error(`${ctor.name} is missing the forge-surface method ${method}`)
+      }
+    }
+    console.log(`ok: ${ctor.name} implements the full forge surface`)
+  }
+
   // Fail-loud without a configured token: the model must get a clear error,
   // never a crash and never a network call.
   const bare = new GitLabClient({}, {
@@ -110,7 +132,7 @@ try {
   })
   let failed = false
   try {
-    await bare.listProjects({})
+    await bare.listRepos({})
   } catch (error) {
     failed = true
     const message = error instanceof Error ? error.message : String(error)
@@ -118,7 +140,7 @@ try {
       throw new Error(`unexpected failure text: ${message}`)
     }
   }
-  if (!failed) throw new Error('listProjects must fail loud without a configured token')
+  if (!failed) throw new Error('listRepos must fail loud without a configured token')
   console.log('ok: unconfigured token fails loud with a clear message')
 
   console.log('SMOKE OK')

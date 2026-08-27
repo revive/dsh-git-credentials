@@ -78,7 +78,7 @@ export class GitLabClient {
    * @param options - search text, membership filter, page size, cancellation.
    * @returns project summaries.
    */
-  async listProjects(options: {
+  async listRepos(options: {
     readonly search?: string
     readonly membership?: boolean
     readonly perPage?: number
@@ -134,7 +134,7 @@ export class GitLabClient {
    * @param options - project (site default when omitted), state, page size, cancellation.
    * @returns merge-request summaries.
    */
-  async listMergeRequests(options: {
+  async listPullRequests(options: {
     readonly project?: string
     readonly state?: MergeRequestState
     readonly perPage?: number
@@ -214,7 +214,7 @@ export class GitLabClient {
    * @param options - project (site default when omitted), branches, title, body, cancellation.
    * @returns the created merge-request summary (canonical entry shape).
    */
-  async createMergeRequest(options: {
+  async createPullRequest(options: {
     readonly project?: string
     readonly title: string
     readonly sourceBranch: string
@@ -241,7 +241,7 @@ export class GitLabClient {
    * @param options - name, optional path/description/visibility, cancellation.
    * @returns the created project summary (canonical project shape).
    */
-  async createProject(options: {
+  async createRepo(options: {
     readonly name: string
     readonly path?: string
     readonly description?: string
@@ -332,7 +332,7 @@ export class GitLabClient {
    * @param options - project (site default when omitted), MR iid, cancellation.
    * @returns the merged merge-request summary.
    */
-  async mergeMergeRequest(options: {
+  async mergePull(options: {
     readonly project?: string
     readonly number: number
     readonly signal?: AbortSignal
@@ -351,7 +351,7 @@ export class GitLabClient {
    * @param options - project (site default when omitted), MR iid, cancellation.
    * @returns the closed merge-request summary.
    */
-  async closeMergeRequest(options: {
+  async closePull(options: {
     readonly project?: string
     readonly number: number
     readonly signal?: AbortSignal
