@@ -185,6 +185,106 @@ export class GiteaClient {
     return raw.map(mapEntry)
   }
 
+  /**
+   * Create an issue in one repository (write operation).
+   * @param options - project, title, optional body, cancellation.
+   * @returns the created issue summary.
+   */
+  async createIssue(options: {
+    readonly project?: string
+    readonly title: string
+    readonly body?: string
+    readonly signal?: AbortSignal
+  }): Promise<{ id: number; title: string; webUrl: string }> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<{ number: number; title: string; html_url: string }>(
+      `/repos/${owner}/${repo}/issues`,
+      { title: options.title, ...options.body === undefined ? {} : { body: options.body } },
+      options.signal,
+    )
+    return { id: raw.number, title: raw.title, webUrl: raw.html_url }
+  }
+
+  /**
+   * Create a pull request in one repository (write operation).
+   * @param options - project (site default when omitted), branches, title, body, cancellation.
+   * @returns the created pull-request summary.
+   */
+  async createPullRequest(options: {
+    readonly project?: string
+    readonly title: string
+    readonly head: string
+    readonly base: string
+    readonly body?: string
+    readonly signal?: AbortSignal
+  }): Promise<{ id: number; title: string; webUrl: string }> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<{ number: number; title: string; html_url: string }>(
+      `/repos/${owner}/${repo}/pulls`,
+      {
+        title: options.title,
+        head: options.head,
+        base: options.base,
+        ...options.body === undefined ? {} : { body: options.body },
+      },
+      options.signal,
+    )
+    return { id: raw.number, title: raw.title, webUrl: raw.html_url }
+  }
+
+  /**
+   * Create a repository under the token owner (write operation).
+   * @param options - name, optional description/visibility, cancellation.
+   * @returns the created repository summary.
+   */
+  async createRepo(options: {
+    readonly name: string
+    readonly description?: string
+    readonly private?: boolean
+    readonly signal?: AbortSignal
+  }): Promise<{ path: string; webUrl: string }> {
+    const raw = await this.post<{ full_name: string; html_url: string }>(
+      '/user/repos',
+      {
+        name: options.name,
+        ...options.description === undefined ? {} : { description: options.description },
+        ...options.private === undefined ? {} : { private: options.private },
+      },
+      options.signal,
+    )
+    return { path: raw.full_name, webUrl: raw.html_url }
+  }
+
+  /** One authenticated POST against the Gitea API. */
+  private async post<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+    const token = tokenFor(this.tokens, this.site)
+    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `token ${token}`,
+          'Accept': 'application/json',
+          'User-Agent': 'dsh-git-credentials',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch (error) {
+      throw new Error(`site "${this.site.id}": request to ${path} failed: ${errorMessage(error)}`)
+    }
+    if (!response.ok) {
+      const detail = await errorDetail(response)
+      const hint = response.status === 401
+        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        : ''
+      throw new Error(`site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
+    }
+    return (await response.json()) as T
+  }
+
   /** The repository's default branch name. */
   private async defaultBranch(owner: string, repo: string, signal?: AbortSignal): Promise<string> {
     const raw = await this.get<{ readonly default_branch: string }>(

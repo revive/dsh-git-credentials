@@ -96,6 +96,27 @@ const fileSchema = {
   additionalProperties: false,
 } as const
 
+/** Canonical shape of one created issue / merge-request / pull-request summary. */
+const createdEntrySchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'integer' },
+    title: { type: 'string' },
+    webUrl: { type: 'string' },
+  },
+  additionalProperties: false,
+} as const
+
+/** Canonical shape of one created project / repository summary. */
+const createdRepoSchema = {
+  type: 'object',
+  properties: {
+    path: { type: 'string' },
+    webUrl: { type: 'string' },
+  },
+  additionalProperties: false,
+} as const
+
 export function apply(ctx: Context, config: PluginConfig): void {
   const store = GitStore.create(config)
 
@@ -287,6 +308,94 @@ export function apply(ctx: Context, config: PluginConfig): void {
   }))
 
   ctx.tools.register(defineTool({
+    name: 'gitlab_create_issue',
+    description: `Create an issue in a GitLab project (write operation). Use when the user asks to file a new issue — the token is injected per site.${SITE_DESCRIPTION}`,
+    parameters: {
+      site: siteParameter,
+      project: {
+        type: 'string', required: true,
+        description: 'Project path on GitLab, e.g. group/subgroup/project.',
+      },
+      title: { type: 'string', required: true, description: 'Issue title.' },
+      body: { type: 'string', description: 'Issue description (Markdown).' },
+    },
+    output: {
+      schema: createdEntrySchema,
+      render: (_args, created: { id: number; title: string; webUrl: string }) => [
+        { type: 'text', text: `Created issue #${created.id}: ${created.title} — ${created.webUrl}` },
+      ],
+    },
+    presentCall(args): GenericCallView {
+      return { card: 'generic', title: `Create issue in ${args.project}`, kind: 'edit' }
+    },
+    async execute(args, exec) {
+      const client = clientFor(args.site, 'gitlab_create_issue', 'gitlab') as GitLabClient
+      return client.createIssue({ ...args, signal: exec.signal })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'gitlab_create_merge_request',
+    description: `Create a merge request in a GitLab project (write operation). Use when the user asks to open an MR — the token is injected per site.${SITE_DESCRIPTION}`,
+    parameters: {
+      site: siteParameter,
+      project: {
+        type: 'string',
+        description: 'Project path; defaults to the site defaultProject when configured.',
+      },
+      title: { type: 'string', required: true, description: 'Merge-request title.' },
+      sourceBranch: { type: 'string', required: true, description: 'Source branch (the changes).' },
+      targetBranch: { type: 'string', required: true, description: 'Target branch (often main or master).' },
+      body: { type: 'string', description: 'Merge-request description (Markdown).' },
+    },
+    output: {
+      schema: createdEntrySchema,
+      render: (_args, created: { id: number; title: string; webUrl: string }) => [
+        { type: 'text', text: `Created merge request !${created.id}: ${created.title} — ${created.webUrl}` },
+      ],
+    },
+    presentCall(args): GenericCallView {
+      return {
+        card: 'generic',
+        title: `Create merge request in ${args.project ?? 'default project'}`,
+        kind: 'edit',
+      }
+    },
+    async execute(args, exec) {
+      const client = clientFor(args.site, 'gitlab_create_merge_request', 'gitlab') as GitLabClient
+      return client.createMergeRequest({ ...args, signal: exec.signal })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'gitlab_create_project',
+    description: `Create a project on GitLab (write operation). Use when the user asks to create a new repository or project — the token is injected per site.${SITE_DESCRIPTION}`,
+    parameters: {
+      site: siteParameter,
+      name: { type: 'string', required: true, description: 'Project name.' },
+      path: { type: 'string', description: 'Project path (defaults to the name).' },
+      description: { type: 'string', description: 'Project description.' },
+      visibility: {
+        type: 'string', enum: ['private', 'internal', 'public'],
+        description: 'Visibility; defaults to the instance default.',
+      },
+    },
+    output: {
+      schema: createdRepoSchema,
+      render: (_args, created: { path: string; webUrl: string }) => [
+        { type: 'text', text: `Created project ${created.path} — ${created.webUrl}` },
+      ],
+    },
+    presentCall(args): GenericCallView {
+      return { card: 'generic', title: `Create GitLab project ${args.name}`, kind: 'edit' }
+    },
+    async execute(args, exec) {
+      const client = clientFor(args.site, 'gitlab_create_project', 'gitlab') as GitLabClient
+      return client.createProject({ ...args, signal: exec.signal })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
     name: 'github_repos',
     description: `List or search GitHub repositories. Use to discover or locate a repository (owner/repo) by name before reading files or listing issues/PRs from it — the token is injected per site.${SITE_DESCRIPTION}`,
     parameters: {
@@ -430,6 +539,90 @@ export function apply(ctx: Context, config: PluginConfig): void {
     },
   }))
 
+  ctx.tools.register(defineTool({
+    name: 'github_create_issue',
+    description: `Create an issue in a GitHub repository (write operation). Use when the user asks to file a new issue — the token is injected per site.${SITE_DESCRIPTION}`,
+    parameters: {
+      site: siteParameter,
+      project: {
+        type: 'string', required: true,
+        description: 'Repository on GitHub, e.g. owner/repo.',
+      },
+      title: { type: 'string', required: true, description: 'Issue title.' },
+      body: { type: 'string', description: 'Issue body (Markdown).' },
+    },
+    output: {
+      schema: createdEntrySchema,
+      render: (_args, created: { id: number; title: string; webUrl: string }) => [
+        { type: 'text', text: `Created issue #${created.id}: ${created.title} — ${created.webUrl}` },
+      ],
+    },
+    presentCall(args): GenericCallView {
+      return { card: 'generic', title: `Create issue in ${args.project}`, kind: 'edit' }
+    },
+    async execute(args, exec) {
+      const client = clientFor(args.site, 'github_create_issue', 'github') as GitHubClient
+      return client.createIssue({ ...args, signal: exec.signal })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'github_create_pull_request',
+    description: `Create a pull request in a GitHub repository (write operation). Use when the user asks to open a PR — the token is injected per site.${SITE_DESCRIPTION}`,
+    parameters: {
+      site: siteParameter,
+      project: {
+        type: 'string',
+        description: 'Repository on GitHub, e.g. owner/repo; defaults to the site defaultProject when configured.',
+      },
+      title: { type: 'string', required: true, description: 'Pull-request title.' },
+      head: { type: 'string', required: true, description: 'Head branch (the changes).' },
+      base: { type: 'string', required: true, description: 'Base branch (often main or master).' },
+      body: { type: 'string', description: 'Pull-request body (Markdown).' },
+    },
+    output: {
+      schema: createdEntrySchema,
+      render: (_args, created: { id: number; title: string; webUrl: string }) => [
+        { type: 'text', text: `Created pull request #${created.id}: ${created.title} — ${created.webUrl}` },
+      ],
+    },
+    presentCall(args): GenericCallView {
+      return {
+        card: 'generic',
+        title: `Create pull request in ${args.project ?? 'default project'}`,
+        kind: 'edit',
+      }
+    },
+    async execute(args, exec) {
+      const client = clientFor(args.site, 'github_create_pull_request', 'github') as GitHubClient
+      return client.createPullRequest({ ...args, signal: exec.signal })
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'github_create_repo',
+    description: `Create a repository under the token owner on GitHub (write operation). Use when the user asks to create a new repository — the token is injected per site.${SITE_DESCRIPTION}`,
+    parameters: {
+      site: siteParameter,
+      name: { type: 'string', required: true, description: 'Repository name.' },
+      description: { type: 'string', description: 'Repository description.' },
+      private: { type: 'boolean', description: 'Create a private repository; defaults to the account default.' },
+    },
+    output: {
+      schema: createdRepoSchema,
+      render: (_args, created: { path: string; webUrl: string }) => [
+        { type: 'text', text: `Created repository ${created.path} — ${created.webUrl}` },
+      ],
+    },
+    presentCall(args): GenericCallView {
+      return { card: 'generic', title: `Create GitHub repository ${args.name}`, kind: 'edit' }
+    },
+    async execute(args, exec) {
+      const client = clientFor(args.site, 'github_create_repo', 'github') as GitHubClient
+      return client.createRepo({ ...args, signal: exec.signal })
+    },
+  }))
+
   // Gitee, Gitea, and Bitbucket share one tool shape (repos / file / issues /
   // pull_requests) with per-provider naming and project vocabulary, so a
   // small factory registers all three providers' tools from the same
@@ -460,6 +653,26 @@ export function apply(ctx: Context, config: PluginConfig): void {
       readonly perPage?: number
       readonly signal?: AbortSignal
     }): Promise<Array<{ number: number; title: string; state: string; webUrl: string; authorName: string }>>
+    createIssue(options: {
+      readonly project?: string
+      readonly title: string
+      readonly body?: string
+      readonly signal?: AbortSignal
+    }): Promise<{ id: number; title: string; webUrl: string }>
+    createPullRequest(options: {
+      readonly project?: string
+      readonly title: string
+      readonly head: string
+      readonly base: string
+      readonly body?: string
+      readonly signal?: AbortSignal
+    }): Promise<{ id: number; title: string; webUrl: string }>
+    createRepo(options: {
+      readonly name: string
+      readonly description?: string
+      readonly private?: boolean
+      readonly signal?: AbortSignal
+    }): Promise<{ path: string; webUrl: string }>
   }
 
   const registerForgeTools = (
@@ -611,6 +824,91 @@ export function apply(ctx: Context, config: PluginConfig): void {
       },
       async execute(args, exec) {
         return client(args, named('pull_requests')).listPullRequests({ ...args, signal: exec.signal })
+      },
+    }))
+
+    ctx.tools.register(defineTool({
+      name: named('create_issue'),
+      description: `Create an issue in a ${label} repository (write operation). Use when the user asks to file a new issue — the token is injected per site.${SITE_DESCRIPTION}`,
+      parameters: {
+        site: siteParameter,
+        project: {
+          type: 'string',
+          description: `Repository on ${label}, e.g. ${projectHint}; defaults to the site defaultProject when configured.`,
+        },
+        title: { type: 'string', required: true, description: 'Issue title.' },
+        body: { type: 'string', description: 'Issue description (Markdown).' },
+      },
+      output: {
+        schema: createdEntrySchema,
+        render: (_args, created: { id: number; title: string; webUrl: string }) => [
+          { type: 'text', text: `Created issue #${created.id}: ${created.title} — ${created.webUrl}` },
+        ],
+      },
+      presentCall(args): GenericCallView {
+        return {
+          card: 'generic',
+          title: `Create issue in ${args.project ?? 'default project'}`,
+          kind: 'edit',
+        }
+      },
+      async execute(args, exec) {
+        return client(args, named('create_issue')).createIssue({ ...args, signal: exec.signal })
+      },
+    }))
+
+    ctx.tools.register(defineTool({
+      name: named('create_pull_request'),
+      description: `Create a pull request in a ${label} repository (write operation). Use when the user asks to open a PR — the token is injected per site.${SITE_DESCRIPTION}`,
+      parameters: {
+        site: siteParameter,
+        project: {
+          type: 'string',
+          description: `Repository on ${label}, e.g. ${projectHint}; defaults to the site defaultProject when configured.`,
+        },
+        title: { type: 'string', required: true, description: 'Pull-request title.' },
+        head: { type: 'string', required: true, description: 'Head branch (the changes).' },
+        base: { type: 'string', required: true, description: 'Base branch (often main or master).' },
+        body: { type: 'string', description: 'Pull-request description (Markdown).' },
+      },
+      output: {
+        schema: createdEntrySchema,
+        render: (_args, created: { id: number; title: string; webUrl: string }) => [
+          { type: 'text', text: `Created pull request #${created.id}: ${created.title} — ${created.webUrl}` },
+        ],
+      },
+      presentCall(args): GenericCallView {
+        return {
+          card: 'generic',
+          title: `Create pull request in ${args.project ?? 'default project'}`,
+          kind: 'edit',
+        }
+      },
+      async execute(args, exec) {
+        return client(args, named('create_pull_request')).createPullRequest({ ...args, signal: exec.signal })
+      },
+    }))
+
+    ctx.tools.register(defineTool({
+      name: named('create_repo'),
+      description: `Create a repository under the token owner on ${label} (write operation). Use when the user asks to create a new repository — the token is injected per site.${SITE_DESCRIPTION}`,
+      parameters: {
+        site: siteParameter,
+        name: { type: 'string', required: true, description: 'Repository name.' },
+        description: { type: 'string', description: 'Repository description.' },
+        private: { type: 'boolean', description: 'Create a private repository; defaults to the account default.' },
+      },
+      output: {
+        schema: createdRepoSchema,
+        render: (_args, created: { path: string; webUrl: string }) => [
+          { type: 'text', text: `Created repository ${created.path} — ${created.webUrl}` },
+        ],
+      },
+      presentCall(args): GenericCallView {
+        return { card: 'generic', title: `Create ${label} repository ${args.name}`, kind: 'edit' }
+      },
+      async execute(args, exec) {
+        return client(args, named('create_repo')).createRepo({ ...args, signal: exec.signal })
       },
     }))
   }

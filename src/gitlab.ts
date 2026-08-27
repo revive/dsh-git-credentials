@@ -190,6 +190,102 @@ export class GitLabClient {
     return raw.default_branch
   }
 
+  /**
+   * Create an issue in one project (write operation).
+   * @param options - project, title, optional body, cancellation.
+   * @returns the created issue summary.
+   */
+  async createIssue(options: {
+    readonly project: string
+    readonly title: string
+    readonly body?: string
+    readonly signal?: AbortSignal
+  }): Promise<{ id: number; title: string; webUrl: string }> {
+    const raw = await this.post<{ iid: number; title: string; web_url: string }>(
+      `/projects/${encodeURIComponent(options.project)}/issues`,
+      { title: options.title, ...options.body === undefined ? {} : { description: options.body } },
+      options.signal,
+    )
+    return { id: raw.iid, title: raw.title, webUrl: raw.web_url }
+  }
+
+  /**
+   * Create a merge request in one project (write operation).
+   * @param options - project (site default when omitted), branches, title, body, cancellation.
+   * @returns the created merge-request summary.
+   */
+  async createMergeRequest(options: {
+    readonly project?: string
+    readonly title: string
+    readonly sourceBranch: string
+    readonly targetBranch: string
+    readonly body?: string
+    readonly signal?: AbortSignal
+  }): Promise<{ id: number; title: string; webUrl: string }> {
+    const project = this.resolveProject(options.project)
+    const raw = await this.post<{ iid: number; title: string; web_url: string }>(
+      `/projects/${encodeURIComponent(project)}/merge_requests`,
+      {
+        title: options.title,
+        source_branch: options.sourceBranch,
+        target_branch: options.targetBranch,
+        ...options.body === undefined ? {} : { description: options.body },
+      },
+      options.signal,
+    )
+    return { id: raw.iid, title: raw.title, webUrl: raw.web_url }
+  }
+
+  /**
+   * Create a project under the token owner (write operation).
+   * @param options - name, optional path/description/visibility, cancellation.
+   * @returns the created project summary.
+   */
+  async createProject(options: {
+    readonly name: string
+    readonly path?: string
+    readonly description?: string
+    readonly visibility?: 'private' | 'internal' | 'public'
+    readonly signal?: AbortSignal
+  }): Promise<{ path: string; webUrl: string }> {
+    const raw = await this.post<{ path_with_namespace: string; web_url: string }>(
+      '/projects',
+      {
+        name: options.name,
+        ...options.path === undefined ? {} : { path: options.path },
+        ...options.description === undefined ? {} : { description: options.description },
+        ...options.visibility === undefined ? {} : { visibility: options.visibility },
+      },
+      options.signal,
+    )
+    return { path: raw.path_with_namespace, webUrl: raw.web_url }
+  }
+
+  /** One authenticated POST against the GitLab REST API. */
+  private async post<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+    const token = this.token()
+    const url = new URL(`/api/v4${path}`, this.site.baseUrl)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: { 'PRIVATE-TOKEN': token, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch (error) {
+      throw new Error(`GitLab site "${this.site.id}": request to ${path} failed: ${errorMessage(error)}`)
+    }
+    if (!response.ok) {
+      const detail = await errorDetail(response)
+      const hint = response.status === 401
+        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        : ''
+      throw new Error(`GitLab site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
+    }
+    return (await response.json()) as T
+  }
+
   /** One authenticated GET against the GitLab REST API. */
   private async get<T>(path: string, options: {
     readonly params?: Record<string, string | undefined>

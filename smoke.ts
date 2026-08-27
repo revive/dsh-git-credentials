@@ -96,6 +96,11 @@ try {
     'gitee_repos', 'gitee_file', 'gitee_issues', 'gitee_pull_requests',
     'gitea_repos', 'gitea_file', 'gitea_issues', 'gitea_pull_requests',
     'bitbucket_repos', 'bitbucket_file', 'bitbucket_issues', 'bitbucket_pull_requests',
+    'gitlab_create_issue', 'gitlab_create_merge_request', 'gitlab_create_project',
+    'github_create_issue', 'github_create_pull_request', 'github_create_repo',
+    'gitee_create_issue', 'gitee_create_pull_request', 'gitee_create_repo',
+    'gitea_create_issue', 'gitea_create_pull_request', 'gitea_create_repo',
+    'bitbucket_create_issue', 'bitbucket_create_pull_request', 'bitbucket_create_repo',
   ]) {
     if (tools.get(name) === undefined) throw new Error(`tool ${name} is not registered`)
     console.log(`ok: ${name} registered`)

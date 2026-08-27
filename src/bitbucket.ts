@@ -243,6 +243,116 @@ export class BitbucketClient {
     }))
   }
 
+  /**
+   * Create an issue in one repository (write operation).
+   * @param options - project (site default when omitted), title, optional body, cancellation.
+   * @returns the created issue summary.
+   */
+  async createIssue(options: {
+    readonly project?: string
+    readonly title: string
+    readonly body?: string
+    readonly signal?: AbortSignal
+  }): Promise<{ id: number; title: string; webUrl: string }> {
+    const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<RawIssue>(
+      `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/issues`,
+      {
+        title: options.title,
+        ...options.body === undefined ? {} : { content: { raw: options.body } },
+      },
+      options.signal,
+    )
+    return { id: raw.id, title: raw.title, webUrl: raw.links.html.href }
+  }
+
+  /**
+   * Create a pull request in one repository (write operation).
+   * @param options - project (site default when omitted), branches, title, body, cancellation.
+   * @returns the created pull-request summary.
+   */
+  async createPullRequest(options: {
+    readonly project?: string
+    readonly title: string
+    readonly head: string
+    readonly base: string
+    readonly body?: string
+    readonly signal?: AbortSignal
+  }): Promise<{ id: number; title: string; webUrl: string }> {
+    const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<RawPull>(
+      `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/pullrequests`,
+      {
+        title: options.title,
+        source: { branch: { name: options.head } },
+        destination: { branch: { name: options.base } },
+        ...options.body === undefined ? {} : { description: options.body },
+      },
+      options.signal,
+    )
+    return { id: raw.id, title: raw.title, webUrl: raw.links.html.href }
+  }
+
+  /**
+   * Create a repository in the site's workspace (write operation). The
+   * workspace comes from the site defaultProject ("workspace/repo").
+   * @param options - name, optional description/visibility, cancellation.
+   * @returns the created repository summary.
+   */
+  async createRepo(options: {
+    readonly name: string
+    readonly description?: string
+    readonly private?: boolean
+    readonly signal?: AbortSignal
+  }): Promise<{ path: string; webUrl: string }> {
+    const workspace = this.site.defaultProject?.split('/')[0] ?? ''
+    if (workspace === '') {
+      throw new Error(
+        `site "${this.site.id}": creating a Bitbucket repository needs a workspace — configure the site defaultProject as "workspace/repo" first`,
+      )
+    }
+    const raw = await this.post<{ full_name: string; links: { html: { href: string } } }>(
+      `/repositories/${encodeURIComponent(workspace)}`,
+      {
+        name: options.name,
+        ...options.description === undefined ? {} : { description: options.description },
+        ...options.private === undefined ? {} : { is_private: options.private },
+      },
+      options.signal,
+    )
+    return { path: raw.full_name, webUrl: raw.links.html.href }
+  }
+
+  /** One authenticated POST against the Bitbucket 2.0 API. */
+  private async post<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+    const token = tokenFor(this.tokens, this.site)
+    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+          'User-Agent': 'dsh-git-credentials',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch (error) {
+      throw new Error(`site "${this.site.id}": request to ${path} failed: ${errorMessage(error)}`)
+    }
+    if (!response.ok) {
+      const detail = await errorDetail(response)
+      const hint = response.status === 401
+        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        : ''
+      throw new Error(`site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
+    }
+    return (await response.json()) as T
+  }
+
   /** The repository's default branch name. */
   private async defaultBranch(workspace: string, repo: string, signal?: AbortSignal): Promise<string> {
     const raw = await this.get<{ readonly mainbranch: { readonly name: string } }>(

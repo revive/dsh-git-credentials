@@ -56,7 +56,7 @@ Losing the key file means the data is unrecoverable (decryption fails loud and r
 Download `dsh-git-credentials-<version>.tgz` from the [releases page](https://github.com/revive/dsh-git-credentials/releases) — the tarball ships the built browser bundle, so no harness checkout or build step is needed — then install it into a profile with the `dsh` CLI:
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.1.1.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.1.2.tgz
 ```
 
 The first use initializes the profile, pnpm links the package, and `dsh` appends the plugin to the profile's bundle layers. Verify the layer without booting:
@@ -127,6 +127,28 @@ Manage sites and tokens in **Settings → Git Credentials**:
 - Token reference names are POSIX identifiers (`GITLAB_TOKEN`, `GITHUB_TOKEN`, `GITEE_TOKEN`, `GITEA_TOKEN`, `BITBUCKET_TOKEN`, …); multiple sites can share one reference or use their own
 - GitLab authenticates with the `PRIVATE-TOKEN` header; GitHub, Gitee, and Bitbucket with `Authorization: Bearer` (Gitee additionally falls back to the `access_token` URL parameter when the header form is rejected); Gitea with `Authorization: token`
 - HTTP goes through Node's built-in `fetch` directly — `ctx.web.fetch` is deliberately not used (URL-only, no header support)
+
+**Write tools** — create operations, each returning the created resource summary (`{ id, title, webUrl }`; repos: `{ path, webUrl }`):
+
+| Tool | Parameters | Returns |
+|---|---|---|
+| `gitlab_create_issue` | `site?`, `project`, `title`, `body?` | created issue |
+| `gitlab_create_merge_request` | `site?`, `project?`, `title`, `sourceBranch`, `targetBranch`, `body?` | created MR |
+| `gitlab_create_project` | `site?`, `name`, `path?`, `description?`, `visibility?` | created project |
+| `github_create_issue` | `site?`, `project`, `title`, `body?` | created issue |
+| `github_create_pull_request` | `site?`, `project?`, `title`, `head`, `base`, `body?` | created PR |
+| `github_create_repo` | `site?`, `name`, `description?`, `private?` | created repository |
+| `gitee_create_issue` | `site?`, `project?`, `title`, `body?` | created issue |
+| `gitee_create_pull_request` | `site?`, `project?`, `title`, `head`, `base`, `body?` | created PR |
+| `gitee_create_repo` | `site?`, `name`, `description?`, `private?` | created repository |
+| `gitea_create_issue` | `site?`, `project?`, `title`, `body?` | created issue |
+| `gitea_create_pull_request` | `site?`, `project?`, `title`, `head`, `base`, `body?` | created PR |
+| `gitea_create_repo` | `site?`, `name`, `description?`, `private?` | created repository |
+| `bitbucket_create_issue` | `site?`, `project?`, `title`, `body?` | created issue |
+| `bitbucket_create_pull_request` | `site?`, `project?`, `title`, `head`, `base`, `body?` | created PR |
+| `bitbucket_create_repo` | `site?`, `name`, `description?`, `private?` | created repository |
+
+> `bitbucket_create_repo` needs the site's `defaultProject` (`workspace/repo`) to know which workspace to create in. All write tools perform a real mutation on the forge — the model should confirm with the user before calling them.
 
 ## How it works
 

@@ -56,7 +56,7 @@ GitHub 发布了官方 MCP server，harness 也原生支持 MCP 客户端——�
 从 [releases 页面](https://github.com/revive/dsh-git-credentials/releases) 下载 `dsh-git-credentials-<version>.tgz`——tarball 自带构建好的浏览器 bundle，无需 harness 检出、无需构建——然后用 `dsh` CLI 装进 profile：
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.1.1.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.1.2.tgz
 ```
 
 首次使用会初始化 profile、pnpm 链接包，`dsh` 自动把插件追加进 profile 的 bundle 层。不 boot 先验证层：
@@ -127,6 +127,28 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 - token 引用名是 POSIX 标识符（`GITLAB_TOKEN`、`GITHUB_TOKEN`、`GITEE_TOKEN`、`GITEA_TOKEN`、`BITBUCKET_TOKEN`…），多站点可各配各的 ref，或共享一个 ref
 - GitLab 用 `PRIVATE-TOKEN` 头；GitHub、Gitee、Bitbucket 用 `Authorization: Bearer`（Gitee 在头被拒绝时自动兜底 `access_token` URL 参数）；Gitea 用 `Authorization: token`
 - HTTP 走 Node 内置 `fetch` 直连——刻意不用 `ctx.web.fetch`（只收 URL、无 header）
+
+**写工具**——创建操作，返回创建结果摘要（`{ id, title, webUrl }`；仓库为 `{ path, webUrl }`）：
+
+| 工具 | 参数 | 返回 |
+|---|---|---|
+| `gitlab_create_issue` | `site?`、`project`、`title`、`body?` | 创建的 issue |
+| `gitlab_create_merge_request` | `site?`、`project?`、`title`、`sourceBranch`、`targetBranch`、`body?` | 创建的 MR |
+| `gitlab_create_project` | `site?`、`name`、`path?`、`description?`、`visibility?` | 创建的项目 |
+| `github_create_issue` | `site?`、`project`、`title`、`body?` | 创建的 issue |
+| `github_create_pull_request` | `site?`、`project?`、`title`、`head`、`base`、`body?` | 创建的 PR |
+| `github_create_repo` | `site?`、`name`、`description?`、`private?` | 创建的仓库 |
+| `gitee_create_issue` | `site?`、`project?`、`title`、`body?` | 创建的 issue |
+| `gitee_create_pull_request` | `site?`、`project?`、`title`、`head`、`base`、`body?` | 创建的 PR |
+| `gitee_create_repo` | `site?`、`name`、`description?`、`private?` | 创建的仓库 |
+| `gitea_create_issue` | `site?`、`project?`、`title`、`body?` | 创建的 issue |
+| `gitea_create_pull_request` | `site?`、`project?`、`title`、`head`、`base`、`body?` | 创建的 PR |
+| `gitea_create_repo` | `site?`、`name`、`description?`、`private?` | 创建的仓库 |
+| `bitbucket_create_issue` | `site?`、`project?`、`title`、`body?` | 创建的 issue |
+| `bitbucket_create_pull_request` | `site?`、`project?`、`title`、`head`、`base`、`body?` | 创建的 PR |
+| `bitbucket_create_repo` | `site?`、`name`、`description?`、`private?` | 创建的仓库 |
+
+> `bitbucket_create_repo` 需要站点配置 `defaultProject`（`workspace/repo`）才能知道在哪个 workspace 创建。所有写工具都会真实修改远端仓库——模型调用前应与用户确认。
 
 ## 工作原理
 
