@@ -1,6 +1,6 @@
 {
   "name": "dsh-git-credentials",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "description": "Out-of-tree dsh plugin: GitLab, GitHub, Gitee, Gitea, and Bitbucket tokens stay out of the model context, stored encrypted (AES-256-GCM) in a plugin-owned file; the model calls forge API tools on demand, and the web settings page manages sites and tokens.",
   "keywords": [

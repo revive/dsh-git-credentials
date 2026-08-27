@@ -193,26 +193,26 @@ export class GitLabClient {
   /**
    * Create an issue in one project (write operation).
    * @param options - project, title, optional body, cancellation.
-   * @returns the created issue summary.
+   * @returns the created issue summary (canonical entry shape).
    */
   async createIssue(options: {
-    readonly project: string
+    readonly project?: string
     readonly title: string
     readonly body?: string
     readonly signal?: AbortSignal
-  }): Promise<{ id: number; title: string; webUrl: string }> {
-    const raw = await this.post<{ iid: number; title: string; web_url: string }>(
-      `/projects/${encodeURIComponent(options.project)}/issues`,
+  }): Promise<GitLabListEntry> {
+    const raw = await this.post<RawListEntry>(
+      `/projects/${encodeURIComponent(this.resolveProject(options.project))}/issues`,
       { title: options.title, ...options.body === undefined ? {} : { description: options.body } },
       options.signal,
     )
-    return { id: raw.iid, title: raw.title, webUrl: raw.web_url }
+    return mapEntry(raw)
   }
 
   /**
    * Create a merge request in one project (write operation).
    * @param options - project (site default when omitted), branches, title, body, cancellation.
-   * @returns the created merge-request summary.
+   * @returns the created merge-request summary (canonical entry shape).
    */
   async createMergeRequest(options: {
     readonly project?: string
@@ -221,9 +221,9 @@ export class GitLabClient {
     readonly targetBranch: string
     readonly body?: string
     readonly signal?: AbortSignal
-  }): Promise<{ id: number; title: string; webUrl: string }> {
+  }): Promise<GitLabListEntry> {
     const project = this.resolveProject(options.project)
-    const raw = await this.post<{ iid: number; title: string; web_url: string }>(
+    const raw = await this.post<RawListEntry>(
       `/projects/${encodeURIComponent(project)}/merge_requests`,
       {
         title: options.title,
@@ -233,13 +233,13 @@ export class GitLabClient {
       },
       options.signal,
     )
-    return { id: raw.iid, title: raw.title, webUrl: raw.web_url }
+    return mapEntry(raw)
   }
 
   /**
    * Create a project under the token owner (write operation).
    * @param options - name, optional path/description/visibility, cancellation.
-   * @returns the created project summary.
+   * @returns the created project summary (canonical project shape).
    */
   async createProject(options: {
     readonly name: string
@@ -247,8 +247,8 @@ export class GitLabClient {
     readonly description?: string
     readonly visibility?: 'private' | 'internal' | 'public'
     readonly signal?: AbortSignal
-  }): Promise<{ path: string; webUrl: string }> {
-    const raw = await this.post<{ path_with_namespace: string; web_url: string }>(
+  }): Promise<GitLabProject> {
+    const raw = await this.post<RawProject>(
       '/projects',
       {
         name: options.name,
@@ -258,7 +258,136 @@ export class GitLabClient {
       },
       options.signal,
     )
-    return { path: raw.path_with_namespace, webUrl: raw.web_url }
+    return mapProject(raw)
+  }
+
+  /**
+   * Close an issue (write operation).
+   * @param options - project, issue iid, cancellation.
+   * @returns the updated issue summary.
+   */
+  async closeIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GitLabListEntry> {
+    return this.setIssueState(options, 'close')
+  }
+
+  /**
+   * Reopen an issue (write operation).
+   * @param options - project, issue iid, cancellation.
+   * @returns the updated issue summary.
+   */
+  async reopenIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GitLabListEntry> {
+    return this.setIssueState(options, 'reopen')
+  }
+
+  /** Set one issue's state (close/reopen) and return the updated entry. */
+  private async setIssueState(
+    options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal },
+    stateEvent: 'close' | 'reopen',
+  ): Promise<GitLabListEntry> {
+    const project = encodeURIComponent(this.resolveProject(options.project))
+    await this.put(`/projects/${project}/issues/${options.number}`, { state_event: stateEvent })
+    const raw = await this.get<RawListEntry>(
+      `/projects/${project}/issues/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapEntry(raw)
+  }
+
+  /**
+   * Comment on an issue (write operation).
+   * @param options - project, issue iid, comment body, cancellation.
+   * @returns a comment-shaped entry (`state: "comment"`, title = comment body).
+   */
+  async commentIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly body: string
+    readonly signal?: AbortSignal
+  }): Promise<GitLabListEntry> {
+    const project = encodeURIComponent(this.resolveProject(options.project))
+    const raw = await this.post<{ id: number; body: string; author: { readonly name: string } | null }>(
+      `/projects/${project}/issues/${options.number}/notes`,
+      { body: options.body },
+      options.signal,
+    )
+    return {
+      iid: options.number,
+      title: options.body,
+      state: 'comment',
+      webUrl: `${this.site.baseUrl.replace(/\/+$/, '')}/${options.project}/-/issues/${options.number}#note_${raw.id}`,
+      authorName: raw.author?.name ?? 'unknown',
+    }
+  }
+
+  /**
+   * Merge a merge request (write operation).
+   * @param options - project (site default when omitted), MR iid, cancellation.
+   * @returns the merged merge-request summary.
+   */
+  async mergeMergeRequest(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GitLabListEntry> {
+    const project = encodeURIComponent(this.resolveProject(options.project))
+    const raw = await this.put<RawListEntry>(
+      `/projects/${project}/merge_requests/${options.number}/merge`,
+      {},
+      options.signal,
+    )
+    return mapEntry(raw)
+  }
+
+  /**
+   * Close a merge request without merging (write operation).
+   * @param options - project (site default when omitted), MR iid, cancellation.
+   * @returns the closed merge-request summary.
+   */
+  async closeMergeRequest(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GitLabListEntry> {
+    const project = encodeURIComponent(this.resolveProject(options.project))
+    await this.put(`/projects/${project}/merge_requests/${options.number}`, { state_event: 'close' })
+    const raw = await this.get<RawListEntry>(
+      `/projects/${project}/merge_requests/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapEntry(raw)
+  }
+
+  /** One authenticated PUT against the GitLab REST API. */
+  private async put<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+    const token = this.token()
+    const url = new URL(`/api/v4${path}`, this.site.baseUrl)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'PUT',
+        headers: { 'PRIVATE-TOKEN': token, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch (error) {
+      throw new Error(`GitLab site "${this.site.id}": request to ${path} failed: ${errorMessage(error)}`)
+    }
+    if (!response.ok) {
+      const detail = await errorDetail(response)
+      const hint = response.status === 401
+        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        : ''
+      throw new Error(`GitLab site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
+    }
+    return (await response.json()) as T
   }
 
   /** One authenticated POST against the GitLab REST API. */
@@ -326,3 +455,25 @@ export class GitLabClient {
 }
 
 
+
+/** Map one raw project to the canonical summary; POST /projects reports path_with_namespace. */
+function mapProject(project: RawProject & { readonly path_with_namespace?: string }): GitLabProject {
+  return {
+    id: project.id,
+    path: project.path_with_namespace ?? project.path,
+    name: project.name,
+    webUrl: project.web_url,
+    visibility: project.visibility,
+  }
+}
+
+/** Map one raw issue/MR entry to the canonical summary. */
+function mapEntry(entry: RawListEntry): GitLabListEntry {
+  return {
+    iid: entry.iid,
+    title: entry.title,
+    state: entry.state,
+    webUrl: entry.web_url,
+    authorName: entry.author?.name ?? 'unknown',
+  }
+}

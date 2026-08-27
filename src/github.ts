@@ -49,6 +49,7 @@ interface RawRepo {
   readonly name: string
   readonly html_url: string
   readonly visibility: string
+  readonly private: boolean
 }
 
 /** Raw issue / pull-request entry; issues list entries carry `pull_request` when they are PRs. */
@@ -190,27 +191,27 @@ export class GitHubClient {
   /**
    * Create an issue in one repository (write operation).
    * @param options - project, title, optional body, cancellation.
-   * @returns the created issue summary.
+   * @returns the created issue summary (canonical entry shape).
    */
   async createIssue(options: {
-    readonly project: string
+    readonly project?: string
     readonly title: string
     readonly body?: string
     readonly signal?: AbortSignal
-  }): Promise<{ id: number; title: string; webUrl: string }> {
-    const [owner, repo] = splitProject(this.site.id, options.project)
-    const raw = await this.post<{ number: number; title: string; html_url: string }>(
+  }): Promise<GitHubEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<RawEntry>(
       `/repos/${owner}/${repo}/issues`,
       { title: options.title, ...options.body === undefined ? {} : { body: options.body } },
       options.signal,
     )
-    return { id: raw.number, title: raw.title, webUrl: raw.html_url }
+    return mapEntry(raw)
   }
 
   /**
    * Create a pull request in one repository (write operation).
    * @param options - project (site default when omitted), branches, title, body, cancellation.
-   * @returns the created pull-request summary.
+   * @returns the created pull-request summary (canonical entry shape).
    */
   async createPullRequest(options: {
     readonly project?: string
@@ -219,9 +220,9 @@ export class GitHubClient {
     readonly base: string
     readonly body?: string
     readonly signal?: AbortSignal
-  }): Promise<{ id: number; title: string; webUrl: string }> {
+  }): Promise<GitHubEntry> {
     const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
-    const raw = await this.post<{ number: number; title: string; html_url: string }>(
+    const raw = await this.post<RawEntry>(
       `/repos/${owner}/${repo}/pulls`,
       {
         title: options.title,
@@ -231,21 +232,21 @@ export class GitHubClient {
       },
       options.signal,
     )
-    return { id: raw.number, title: raw.title, webUrl: raw.html_url }
+    return mapEntry(raw)
   }
 
   /**
    * Create a repository under the token owner (write operation).
    * @param options - name, optional description/visibility, cancellation.
-   * @returns the created repository summary.
+   * @returns the created repository summary (canonical repo shape).
    */
   async createRepo(options: {
     readonly name: string
     readonly description?: string
     readonly private?: boolean
     readonly signal?: AbortSignal
-  }): Promise<{ path: string; webUrl: string }> {
-    const raw = await this.post<{ full_name: string; html_url: string }>(
+  }): Promise<GitHubRepo> {
+    const raw = await this.post<RawRepo>(
       '/user/repos',
       {
         name: options.name,
@@ -254,7 +255,157 @@ export class GitHubClient {
       },
       options.signal,
     )
-    return { path: raw.full_name, webUrl: raw.html_url }
+    return {
+      id: raw.id,
+      path: raw.full_name,
+      name: raw.name,
+      webUrl: raw.html_url,
+      visibility: raw.private ? 'private' : 'public',
+    }
+  }
+
+  /**
+   * Close an issue (write operation).
+   * @param options - project, issue number, cancellation.
+   * @returns the updated issue summary.
+   */
+  async closeIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GitHubEntry> {
+    return this.setIssueState(options, 'closed')
+  }
+
+  /**
+   * Reopen an issue (write operation).
+   * @param options - project, issue number, cancellation.
+   * @returns the updated issue summary.
+   */
+  async reopenIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GitHubEntry> {
+    return this.setIssueState(options, 'open')
+  }
+
+  /** Set one issue's state (close/reopen) and return the updated entry. */
+  private async setIssueState(
+    options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal },
+    state: 'open' | 'closed',
+  ): Promise<GitHubEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    await this.patch(`/repos/${owner}/${repo}/issues/${options.number}`, { state })
+    return this.issueEntry(owner, repo, options.number, options.signal)
+  }
+
+  /**
+   * Comment on an issue (write operation).
+   * @param options - project, issue number, comment body, cancellation.
+   * @returns a comment-shaped entry (`state: "comment"`, title = comment body).
+   */
+  async commentIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly body: string
+    readonly signal?: AbortSignal
+  }): Promise<GitHubEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<{ id: number; html_url: string; user: { login: string } | null }>(
+      `/repos/${owner}/${repo}/issues/${options.number}/comments`,
+      { body: options.body },
+      options.signal,
+    )
+    return {
+      number: options.number,
+      title: options.body,
+      state: 'comment',
+      webUrl: raw.html_url,
+      authorName: raw.user?.login ?? 'unknown',
+    }
+  }
+
+  /**
+   * Merge a pull request (write operation).
+   * @param options - project, PR number, cancellation.
+   * @returns the merged pull-request summary.
+   */
+  async mergePull(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GitHubEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    await this.put(`/repos/${owner}/${repo}/pulls/${options.number}/merge`, {})
+    return this.pullEntry(owner, repo, options.number, options.signal)
+  }
+
+  /**
+   * Close a pull request without merging (write operation).
+   * @param options - project, PR number, cancellation.
+   * @returns the closed pull-request summary.
+   */
+  async closePull(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GitHubEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    await this.patch(`/repos/${owner}/${repo}/pulls/${options.number}`, { state: 'closed' })
+    return this.pullEntry(owner, repo, options.number, options.signal)
+  }
+
+  /** One issue entry by number. */
+  private async issueEntry(owner: string, repo: string, number: number, signal?: AbortSignal): Promise<GitHubEntry> {
+    const raw = await this.get<RawEntry>(`/repos/${owner}/${repo}/issues/${number}`, signal === undefined ? {} : { signal })
+    return mapEntry(raw)
+  }
+
+  /** One pull-request entry by number. */
+  private async pullEntry(owner: string, repo: string, number: number, signal?: AbortSignal): Promise<GitHubEntry> {
+    const raw = await this.get<RawEntry>(`/repos/${owner}/${repo}/pulls/${number}`, signal === undefined ? {} : { signal })
+    return mapEntry(raw)
+  }
+
+  /** One authenticated PATCH against the GitHub REST API. */
+  private async patch<T = unknown>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+    return this.write<T>('PATCH', path, body, signal)
+  }
+
+  /** One authenticated PUT against the GitHub REST API. */
+  private async put<T = unknown>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+    return this.write<T>('PUT', path, body, signal)
+  }
+
+  /** One authenticated JSON write (PATCH/PUT) against the GitHub REST API. */
+  private async write<T>(method: 'PATCH' | 'PUT', path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+    const token = tokenFor(this.tokens, this.site)
+    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/vnd.github+json',
+          'User-Agent': 'dsh-git-credentials',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch (error) {
+      throw new Error(`site "${this.site.id}": request to ${path} failed: ${errorMessage(error)}`)
+    }
+    if (!response.ok) {
+      const detail = await errorDetail(response)
+      const hint = response.status === 401
+        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        : ''
+      throw new Error(`site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
+    }
+    return (await response.json()) as T
   }
 
   /** One authenticated POST against the GitHub REST API. */

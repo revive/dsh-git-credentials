@@ -188,27 +188,27 @@ export class GiteaClient {
   /**
    * Create an issue in one repository (write operation).
    * @param options - project, title, optional body, cancellation.
-   * @returns the created issue summary.
+   * @returns the created issue summary (canonical entry shape).
    */
   async createIssue(options: {
     readonly project?: string
     readonly title: string
     readonly body?: string
     readonly signal?: AbortSignal
-  }): Promise<{ id: number; title: string; webUrl: string }> {
+  }): Promise<GiteaEntry> {
     const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
-    const raw = await this.post<{ number: number; title: string; html_url: string }>(
+    const raw = await this.post<RawEntry>(
       `/repos/${owner}/${repo}/issues`,
       { title: options.title, ...options.body === undefined ? {} : { body: options.body } },
       options.signal,
     )
-    return { id: raw.number, title: raw.title, webUrl: raw.html_url }
+    return mapEntry(raw)
   }
 
   /**
    * Create a pull request in one repository (write operation).
    * @param options - project (site default when omitted), branches, title, body, cancellation.
-   * @returns the created pull-request summary.
+   * @returns the created pull-request summary (canonical entry shape).
    */
   async createPullRequest(options: {
     readonly project?: string
@@ -217,9 +217,9 @@ export class GiteaClient {
     readonly base: string
     readonly body?: string
     readonly signal?: AbortSignal
-  }): Promise<{ id: number; title: string; webUrl: string }> {
+  }): Promise<GiteaEntry> {
     const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
-    const raw = await this.post<{ number: number; title: string; html_url: string }>(
+    const raw = await this.post<RawEntry>(
       `/repos/${owner}/${repo}/pulls`,
       {
         title: options.title,
@@ -229,21 +229,21 @@ export class GiteaClient {
       },
       options.signal,
     )
-    return { id: raw.number, title: raw.title, webUrl: raw.html_url }
+    return mapEntry(raw)
   }
 
   /**
    * Create a repository under the token owner (write operation).
    * @param options - name, optional description/visibility, cancellation.
-   * @returns the created repository summary.
+   * @returns the created repository summary (canonical repo shape).
    */
   async createRepo(options: {
     readonly name: string
     readonly description?: string
     readonly private?: boolean
     readonly signal?: AbortSignal
-  }): Promise<{ path: string; webUrl: string }> {
-    const raw = await this.post<{ full_name: string; html_url: string }>(
+  }): Promise<GiteaRepo> {
+    const raw = await this.post<RawRepo>(
       '/user/repos',
       {
         name: options.name,
@@ -252,7 +252,136 @@ export class GiteaClient {
       },
       options.signal,
     )
-    return { path: raw.full_name, webUrl: raw.html_url }
+    return mapRepo(raw)
+  }
+
+  /**
+   * Close an issue (write operation).
+   * @param options - project, issue number, cancellation.
+   * @returns the updated issue summary.
+   */
+  async closeIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GiteaEntry> {
+    return this.setIssueState(options, 'closed', `/repos/${splitProject(this.site.id, this.resolveProject(options.project)).join('/')}/issues/${options.number}`)
+  }
+
+  /**
+   * Reopen an issue (write operation).
+   * @param options - project, issue number, cancellation.
+   * @returns the updated issue summary.
+   */
+  async reopenIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GiteaEntry> {
+    return this.setIssueState(options, 'open', `/repos/${splitProject(this.site.id, this.resolveProject(options.project)).join('/')}/issues/${options.number}`)
+  }
+
+  /** Set one issue's state (close/reopen) and return the updated entry. */
+  private async setIssueState(
+    options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal },
+    state: 'open' | 'closed',
+    path: string,
+  ): Promise<GiteaEntry> {
+    await this.patch(path, { state })
+    const raw = await this.get<RawEntry>(path, options.signal === undefined ? {} : { signal: options.signal })
+    return mapEntry(raw)
+  }
+
+  /**
+   * Comment on an issue (write operation).
+   * @param options - project, issue number, comment body, cancellation.
+   * @returns a comment-shaped entry (`state: "comment"`, title = comment body).
+   */
+  async commentIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly body: string
+    readonly signal?: AbortSignal
+  }): Promise<GiteaEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<{ id: number; html_url: string; user: { login: string } | null }>(
+      `/repos/${owner}/${repo}/issues/${options.number}/comments`,
+      { body: options.body },
+      options.signal,
+    )
+    return {
+      number: options.number,
+      title: options.body,
+      state: 'comment',
+      webUrl: raw.html_url,
+      authorName: raw.user?.login ?? 'unknown',
+    }
+  }
+
+  /**
+   * Merge a pull request (write operation).
+   * @param options - project (site default when omitted), PR number, cancellation.
+   * @returns the merged pull-request summary.
+   */
+  async mergePull(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GiteaEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    await this.post(`/repos/${owner}/${repo}/pulls/${options.number}/merge`, {}, options.signal)
+    const raw = await this.get<RawEntry>(
+      `/repos/${owner}/${repo}/pulls/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapEntry({ ...raw, state: 'merged' })
+  }
+
+  /**
+   * Close a pull request without merging (write operation).
+   * @param options - project (site default when omitted), PR number, cancellation.
+   * @returns the closed pull-request summary.
+   */
+  async closePull(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<GiteaEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const path = `/repos/${owner}/${repo}/pulls/${options.number}`
+    await this.patch(path, { state: 'closed' })
+    const raw = await this.get<RawEntry>(path, options.signal === undefined ? {} : { signal: options.signal })
+    return mapEntry(raw)
+  }
+
+  /** One authenticated PATCH against the Gitea API. */
+  private async patch<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+    const token = tokenFor(this.tokens, this.site)
+    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `token ${token}`,
+          'Accept': 'application/json',
+          'User-Agent': 'dsh-git-credentials',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch (error) {
+      throw new Error(`site "${this.site.id}": request to ${path} failed: ${errorMessage(error)}`)
+    }
+    if (!response.ok) {
+      const detail = await errorDetail(response)
+      const hint = response.status === 401
+        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        : ''
+      throw new Error(`site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
+    }
+    return (await response.json()) as T
   }
 
   /** One authenticated POST against the Gitea API. */

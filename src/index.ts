@@ -8,14 +8,20 @@
  * restart. The plugin is a pure out-of-tree bolt-on: it uses no product wire
  * channel and mounts/unmounts dynamically through the home-level patch
  * layer.
+ *
+ * Tool layout: one resource tool per provider (repos / projects, file,
+ * issues, pull requests / merge requests), with an `action` parameter that
+ * selects list, create, or modify behaviour — issue and pull-request tools
+ * cover create/close/reopen/comment and create/merge/close respectively,
+ * so the model-side tool table stays compact.
  * @module dsh-git-credentials
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
 import { defineTool, type GenericCallView } from '@deepseek-ai/dsh-tools'
-import { GitLabClient, type GitLabFile, type GitLabListEntry, type GitLabProject } from './gitlab.ts'
-import { GitHubClient, type GitHubEntry, type GitHubFile, type GitHubRepo } from './github.ts'
+import { GitLabClient, type GitLabFile } from './gitlab.ts'
+import { GitHubClient, type GitHubFile } from './github.ts'
 import { GiteeClient } from './gitee.ts'
 import { GiteaClient } from './gitea.ts'
 import { BitbucketClient } from './bitbucket.ts'
@@ -45,7 +51,7 @@ const siteParameter = {
   description: 'Which configured site to call (ids are managed in Settings → Git 凭据).',
 } as const
 
-/** Canonical shape of one repository/project summary (both providers). */
+/** Canonical shape of one repository/project summary (all providers). */
 const repoSchema = {
   type: 'object',
   properties: {
@@ -58,7 +64,7 @@ const repoSchema = {
   additionalProperties: false,
 } as const
 
-/** Canonical shape of one GitLab merge-request or issue summary. */
+/** Canonical shape of one GitLab merge-request or issue summary (iid-keyed). */
 const listEntrySchema = {
   type: 'object',
   properties: {
@@ -71,7 +77,7 @@ const listEntrySchema = {
   additionalProperties: false,
 } as const
 
-/** Canonical shape of one GitHub issue or pull-request summary. */
+/** Canonical shape of one GitHub / Gitee / Gitea / Bitbucket issue or PR summary (number-keyed). */
 const githubEntrySchema = {
   type: 'object',
   properties: {
@@ -84,7 +90,7 @@ const githubEntrySchema = {
   additionalProperties: false,
 } as const
 
-/** Canonical shape of one file read (both providers). */
+/** Canonical shape of one file read (all providers). */
 const fileSchema = {
   type: 'object',
   properties: {
@@ -96,26 +102,22 @@ const fileSchema = {
   additionalProperties: false,
 } as const
 
-/** Canonical shape of one created issue / merge-request / pull-request summary. */
-const createdEntrySchema = {
-  type: 'object',
-  properties: {
-    id: { type: 'integer' },
-    title: { type: 'string' },
-    webUrl: { type: 'string' },
-  },
-  additionalProperties: false,
-} as const
+/** One entry as the loop sees it (iid and number are the two key spellings). */
+interface IterationEntry {
+  readonly number?: number
+  readonly iid?: number
+  readonly title: string
+  readonly state: string
+  readonly webUrl: string
+  readonly authorName: string
+}
 
-/** Canonical shape of one created project / repository summary. */
-const createdRepoSchema = {
-  type: 'object',
-  properties: {
-    path: { type: 'string' },
-    webUrl: { type: 'string' },
-  },
-  additionalProperties: false,
-} as const
+/** One repo as the loop sees it. */
+interface IterationRepo {
+  readonly path: string
+  readonly visibility: string
+  readonly webUrl: string
+}
 
 export function apply(ctx: Context, config: PluginConfig): void {
   const store = GitStore.create(config)
@@ -162,472 +164,66 @@ export function apply(ctx: Context, config: PluginConfig): void {
   ctx.logger('git-credentials').info('git-credentials plugin loaded')
   registerGitLabAdmin(ctx, { store })
 
-  ctx.tools.register(defineTool({
-    name: 'gitlab_projects',
-    description: `List or search projects on GitLab (self-hosted or gitlab.com). Use when the user references a GitLab repository or project and you need its path (group/subgroup/project) — the token is injected per site and never enters the model context.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      search: { type: 'string', description: 'Filter projects whose name or path contains this text.' },
-      membership: { type: 'boolean', description: 'Only list projects the token owner belongs to.' },
-      perPage: { type: 'integer', description: 'Maximum number of projects to return (1-100).' },
-    },
-    output: {
-      schema: { type: 'array', items: repoSchema },
-      render: (_args, projects: GitLabProject[]) => projects.length === 0
-        ? [{ type: 'text', text: 'No projects found.' }]
-        : [{
+  /** Throw a loud error unless the argument is a non-empty string. */
+  const needString = (args: Record<string, unknown>, key: string, tool: string): string => {
+    const value = args[key]
+    if (typeof value !== 'string' || value.trim() === '') {
+      throw new Error(`${tool}: the "${key}" argument is required for this action`)
+    }
+    return value
+  }
+
+  /** Throw a loud error unless the argument is a positive integer (issue/PR number). */
+  const needNumber = (args: Record<string, unknown>, tool: string): number => {
+    const value = args.number
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+      throw new Error(`${tool}: a positive integer "number" argument is required (the issue/PR number)`)
+    }
+    return value
+  }
+
+  /** The entry id for display (iid on GitLab, number elsewhere). */
+  const entryId = (entry: IterationEntry): number => entry.number ?? entry.iid ?? 0
+
+  /** Render one issues/pulls action result. */
+  const renderEntryAction = (label: string, plural: string) =>
+    (args: { action?: string }, entries: IterationEntry[]): Array<{ type: 'text'; text: string }> => {
+      const action = args.action ?? 'list'
+      const entry = entries[0]
+      if (entry === undefined) {
+        if (action === 'list') return [{ type: 'text', text: `No ${plural} found.` }]
+        return [{ type: 'text', text: `${label} updated (no summary returned)` }]
+      }
+      switch (action) {
+        case 'create': return [{ type: 'text', text: `Created ${label} #${entryId(entry)}: ${entry.title} — ${entry.webUrl}` }]
+        case 'close': return [{ type: 'text', text: `Closed ${label} #${entryId(entry)} — ${entry.webUrl}` }]
+        case 'reopen': return [{ type: 'text', text: `Reopened ${label} #${entryId(entry)} — ${entry.webUrl}` }]
+        case 'comment': return [{ type: 'text', text: `Commented on ${label} #${entryId(entry)}: ${entry.title} — ${entry.webUrl}` }]
+        case 'merge': return [{ type: 'text', text: `Merged ${label} #${entryId(entry)}: ${entry.title} — ${entry.webUrl}` }]
+        default: return [{
           type: 'text',
-          text: projects.map(project => `${project.path} (${project.visibility}) — ${project.webUrl}`).join('\n'),
-        }],
-    },
-    presentCall(args): GenericCallView {
-      return {
-        card: 'generic',
-        title: `GitLab projects${args.search === undefined ? '' : ` matching ${args.search}`}`,
-        kind: 'search',
+          text: entries.map(item => `#${entryId(item)} [${item.state}] ${item.title} — ${item.authorName} — ${item.webUrl}`).join('\n'),
+        }]
       }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'gitlab_projects', 'gitlab') as GitLabClient
-      return client.listProjects({ ...args, signal: exec.signal })
-    },
-  }))
+    }
 
-  ctx.tools.register(defineTool({
-    name: 'gitlab_file',
-    description: `Read one file from a GitLab project. Use whenever an answer may live in a GitLab repository the user mentions — the token is injected automatically and never appears in the model context.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      project: {
-        type: 'string', required: true,
-        description: 'Project path on GitLab, e.g. group/subgroup/project.',
-      },
-      path: {
-        type: 'string', required: true,
-        description: 'File path within the repository, e.g. src/index.ts.',
-      },
-      ref: {
-        type: 'string',
-        description: 'Branch or tag to read from; defaults to the project default branch.',
-      },
-    },
-    output: {
-      schema: fileSchema,
-      render: (_args, file: GitLabFile) => [
-        { type: 'text', text: file.truncated ? `(truncated) ${file.path}@${file.ref}` : `${file.path}@${file.ref}` },
-        { type: 'text', text: file.content },
-      ],
-    },
-    presentCall(args): GenericCallView {
-      return {
-        card: 'generic',
-        title: `Read ${args.path}@${args.ref ?? 'default branch'} in ${args.project}`,
-        kind: 'read',
-      }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'gitlab_file', 'gitlab') as GitLabClient
-      return client.readFile({ ...args, maxBytes: config.fileReadMaxBytes, signal: exec.signal })
-    },
-  }))
+  /** Render one repos/projects action result. */
+  const renderRepoAction = (args: { action?: string }, repos: IterationRepo[]): Array<{ type: 'text'; text: string }> => {
+    if (args.action === 'create') {
+      const repo = repos[0]
+      return repo === undefined
+        ? [{ type: 'text', text: 'Created repository (no summary returned)' }]
+        : [{ type: 'text', text: `Created repository ${repo.path} — ${repo.webUrl}` }]
+    }
+    return repos.length === 0
+      ? [{ type: 'text', text: 'No repositories found.' }]
+      : [{ type: 'text', text: repos.map(repo => `${repo.path} (${repo.visibility}) — ${repo.webUrl}`).join('\n') }]
+  }
 
-  ctx.tools.register(defineTool({
-    name: 'gitlab_merge_requests',
-    description: `List merge requests of a GitLab project. Use when the user references an MR, a code review, or asks about open/merged changes — the token is injected per site.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      project: {
-        type: 'string',
-        description: 'Project path; defaults to the site defaultProject when configured.',
-      },
-      state: {
-        type: 'string', enum: ['opened', 'closed', 'all', 'merged'],
-        description: 'Filter by state; defaults to opened.',
-      },
-      perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
-    },
-    output: {
-      schema: { type: 'array', items: listEntrySchema },
-      render: (_args, entries: GitLabListEntry[]) => entries.length === 0
-        ? [{ type: 'text', text: 'No merge requests found.' }]
-        : [{
-          type: 'text',
-          text: entries.map(entry => `!${entry.iid} [${entry.state}] ${entry.title} — ${entry.authorName} — ${entry.webUrl}`)
-            .join('\n'),
-        }],
-    },
-    presentCall(args): GenericCallView {
-      return {
-        card: 'generic',
-        title: `Merge requests of ${args.project ?? 'default project'}`,
-        kind: 'search',
-      }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'gitlab_merge_requests', 'gitlab') as GitLabClient
-      return client.listMergeRequests({ ...args, signal: exec.signal })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'gitlab_issues',
-    description: `List issues of a GitLab project. Use when the user references a GitLab issue or asks about open issues — the token is injected per site.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      project: {
-        type: 'string',
-        description: 'Project path; defaults to the site defaultProject when configured.',
-      },
-      state: {
-        type: 'string', enum: ['opened', 'closed', 'all'],
-        description: 'Filter by state; defaults to opened.',
-      },
-      perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
-    },
-    output: {
-      schema: { type: 'array', items: listEntrySchema },
-      render: (_args, entries: GitLabListEntry[]) => entries.length === 0
-        ? [{ type: 'text', text: 'No issues found.' }]
-        : [{
-          type: 'text',
-          text: entries.map(entry => `#${entry.iid} [${entry.state}] ${entry.title} — ${entry.authorName} — ${entry.webUrl}`)
-            .join('\n'),
-        }],
-    },
-    presentCall(args): GenericCallView {
-      return {
-        card: 'generic',
-        title: `Issues of ${args.project ?? 'default project'}`,
-        kind: 'search',
-      }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'gitlab_issues', 'gitlab') as GitLabClient
-      return client.listIssues({ ...args, signal: exec.signal })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'gitlab_create_issue',
-    description: `Create an issue in a GitLab project (write operation). Use when the user asks to file a new issue — the token is injected per site.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      project: {
-        type: 'string', required: true,
-        description: 'Project path on GitLab, e.g. group/subgroup/project.',
-      },
-      title: { type: 'string', required: true, description: 'Issue title.' },
-      body: { type: 'string', description: 'Issue description (Markdown).' },
-    },
-    output: {
-      schema: createdEntrySchema,
-      render: (_args, created: { id: number; title: string; webUrl: string }) => [
-        { type: 'text', text: `Created issue #${created.id}: ${created.title} — ${created.webUrl}` },
-      ],
-    },
-    presentCall(args): GenericCallView {
-      return { card: 'generic', title: `Create issue in ${args.project}`, kind: 'edit' }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'gitlab_create_issue', 'gitlab') as GitLabClient
-      return client.createIssue({ ...args, signal: exec.signal })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'gitlab_create_merge_request',
-    description: `Create a merge request in a GitLab project (write operation). Use when the user asks to open an MR — the token is injected per site.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      project: {
-        type: 'string',
-        description: 'Project path; defaults to the site defaultProject when configured.',
-      },
-      title: { type: 'string', required: true, description: 'Merge-request title.' },
-      sourceBranch: { type: 'string', required: true, description: 'Source branch (the changes).' },
-      targetBranch: { type: 'string', required: true, description: 'Target branch (often main or master).' },
-      body: { type: 'string', description: 'Merge-request description (Markdown).' },
-    },
-    output: {
-      schema: createdEntrySchema,
-      render: (_args, created: { id: number; title: string; webUrl: string }) => [
-        { type: 'text', text: `Created merge request !${created.id}: ${created.title} — ${created.webUrl}` },
-      ],
-    },
-    presentCall(args): GenericCallView {
-      return {
-        card: 'generic',
-        title: `Create merge request in ${args.project ?? 'default project'}`,
-        kind: 'edit',
-      }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'gitlab_create_merge_request', 'gitlab') as GitLabClient
-      return client.createMergeRequest({ ...args, signal: exec.signal })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'gitlab_create_project',
-    description: `Create a project on GitLab (write operation). Use when the user asks to create a new repository or project — the token is injected per site.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      name: { type: 'string', required: true, description: 'Project name.' },
-      path: { type: 'string', description: 'Project path (defaults to the name).' },
-      description: { type: 'string', description: 'Project description.' },
-      visibility: {
-        type: 'string', enum: ['private', 'internal', 'public'],
-        description: 'Visibility; defaults to the instance default.',
-      },
-    },
-    output: {
-      schema: createdRepoSchema,
-      render: (_args, created: { path: string; webUrl: string }) => [
-        { type: 'text', text: `Created project ${created.path} — ${created.webUrl}` },
-      ],
-    },
-    presentCall(args): GenericCallView {
-      return { card: 'generic', title: `Create GitLab project ${args.name}`, kind: 'edit' }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'gitlab_create_project', 'gitlab') as GitLabClient
-      return client.createProject({ ...args, signal: exec.signal })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'github_repos',
-    description: `List or search GitHub repositories. Use to discover or locate a repository (owner/repo) by name before reading files or listing issues/PRs from it — the token is injected per site.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      search: { type: 'string', description: 'Filter repositories by name.' },
-      perPage: { type: 'integer', description: 'Maximum number of repositories to return (1-100).' },
-    },
-    output: {
-      schema: { type: 'array', items: repoSchema },
-      render: (_args, repos: GitHubRepo[]) => repos.length === 0
-        ? [{ type: 'text', text: 'No repositories found.' }]
-        : [{
-          type: 'text',
-          text: repos.map(repo => `${repo.path} (${repo.visibility}) — ${repo.webUrl}`).join('\n'),
-        }],
-    },
-    presentCall(args): GenericCallView {
-      return {
-        card: 'generic',
-        title: `GitHub repositories${args.search === undefined ? '' : ` matching ${args.search}`}`,
-        kind: 'search',
-      }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'github_repos', 'github') as GitHubClient
-      return client.listRepos({ ...args, signal: exec.signal })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'github_file',
-    description: `Read one file from a GitHub repository the token can access (public or private). Use whenever an answer may live in a GitHub repo the user mentions — the token is injected automatically and never enters the model context.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      project: {
-        type: 'string', required: true,
-        description: 'Repository on GitHub, e.g. owner/repo.',
-      },
-      path: {
-        type: 'string', required: true,
-        description: 'File path within the repository, e.g. src/index.ts.',
-      },
-      ref: {
-        type: 'string',
-        description: 'Branch or tag to read from; defaults to the repository default branch.',
-      },
-    },
-    output: {
-      schema: fileSchema,
-      render: (_args, file: GitHubFile) => [
-        { type: 'text', text: file.truncated ? `(truncated) ${file.path}@${file.ref}` : `${file.path}@${file.ref}` },
-        { type: 'text', text: file.content },
-      ],
-    },
-    presentCall(args): GenericCallView {
-      return {
-        card: 'generic',
-        title: `Read ${args.path}@${args.ref ?? 'default branch'} in ${args.project}`,
-        kind: 'read',
-      }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'github_file', 'github') as GitHubClient
-      return client.readFile({ ...args, maxBytes: config.fileReadMaxBytes, signal: exec.signal })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'github_issues',
-    description: `List issues of a GitHub repository (pull requests excluded). Use when the user references a GitHub issue or wants open issues — the token is injected per site.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      project: {
-        type: 'string',
-        description: 'Repository on GitHub, e.g. owner/repo; defaults to the site defaultProject when configured.',
-      },
-      state: {
-        type: 'string', enum: ['open', 'closed', 'all'],
-        description: 'Filter by state; defaults to open.',
-      },
-      perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
-    },
-    output: {
-      schema: { type: 'array', items: githubEntrySchema },
-      render: (_args, entries: GitHubEntry[]) => entries.length === 0
-        ? [{ type: 'text', text: 'No issues found.' }]
-        : [{
-          type: 'text',
-          text: entries.map(entry => `#${entry.number} [${entry.state}] ${entry.title} — ${entry.authorName} — ${entry.webUrl}`)
-            .join('\n'),
-        }],
-    },
-    presentCall(args): GenericCallView {
-      return {
-        card: 'generic',
-        title: `Issues of ${args.project ?? 'default project'}`,
-        kind: 'search',
-      }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'github_issues', 'github') as GitHubClient
-      return client.listIssues({ ...args, signal: exec.signal })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'github_pull_requests',
-    description: `List pull requests of a GitHub repository. Use when the user references a PR, a code review, or asks about open/closed PRs — the token is injected per site.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      project: {
-        type: 'string',
-        description: 'Repository on GitHub, e.g. owner/repo; defaults to the site defaultProject when configured.',
-      },
-      state: {
-        type: 'string', enum: ['open', 'closed', 'all'],
-        description: 'Filter by state; defaults to open.',
-      },
-      perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
-    },
-    output: {
-      schema: { type: 'array', items: githubEntrySchema },
-      render: (_args, entries: GitHubEntry[]) => entries.length === 0
-        ? [{ type: 'text', text: 'No pull requests found.' }]
-        : [{
-          type: 'text',
-          text: entries.map(entry => `#${entry.number} [${entry.state}] ${entry.title} — ${entry.authorName} — ${entry.webUrl}`)
-            .join('\n'),
-        }],
-    },
-    presentCall(args): GenericCallView {
-      return {
-        card: 'generic',
-        title: `Pull requests of ${args.project ?? 'default project'}`,
-        kind: 'search',
-      }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'github_pull_requests', 'github') as GitHubClient
-      return client.listPullRequests({ ...args, signal: exec.signal })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'github_create_issue',
-    description: `Create an issue in a GitHub repository (write operation). Use when the user asks to file a new issue — the token is injected per site.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      project: {
-        type: 'string', required: true,
-        description: 'Repository on GitHub, e.g. owner/repo.',
-      },
-      title: { type: 'string', required: true, description: 'Issue title.' },
-      body: { type: 'string', description: 'Issue body (Markdown).' },
-    },
-    output: {
-      schema: createdEntrySchema,
-      render: (_args, created: { id: number; title: string; webUrl: string }) => [
-        { type: 'text', text: `Created issue #${created.id}: ${created.title} — ${created.webUrl}` },
-      ],
-    },
-    presentCall(args): GenericCallView {
-      return { card: 'generic', title: `Create issue in ${args.project}`, kind: 'edit' }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'github_create_issue', 'github') as GitHubClient
-      return client.createIssue({ ...args, signal: exec.signal })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'github_create_pull_request',
-    description: `Create a pull request in a GitHub repository (write operation). Use when the user asks to open a PR — the token is injected per site.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      project: {
-        type: 'string',
-        description: 'Repository on GitHub, e.g. owner/repo; defaults to the site defaultProject when configured.',
-      },
-      title: { type: 'string', required: true, description: 'Pull-request title.' },
-      head: { type: 'string', required: true, description: 'Head branch (the changes).' },
-      base: { type: 'string', required: true, description: 'Base branch (often main or master).' },
-      body: { type: 'string', description: 'Pull-request body (Markdown).' },
-    },
-    output: {
-      schema: createdEntrySchema,
-      render: (_args, created: { id: number; title: string; webUrl: string }) => [
-        { type: 'text', text: `Created pull request #${created.id}: ${created.title} — ${created.webUrl}` },
-      ],
-    },
-    presentCall(args): GenericCallView {
-      return {
-        card: 'generic',
-        title: `Create pull request in ${args.project ?? 'default project'}`,
-        kind: 'edit',
-      }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'github_create_pull_request', 'github') as GitHubClient
-      return client.createPullRequest({ ...args, signal: exec.signal })
-    },
-  }))
-
-  ctx.tools.register(defineTool({
-    name: 'github_create_repo',
-    description: `Create a repository under the token owner on GitHub (write operation). Use when the user asks to create a new repository — the token is injected per site.${SITE_DESCRIPTION}`,
-    parameters: {
-      site: siteParameter,
-      name: { type: 'string', required: true, description: 'Repository name.' },
-      description: { type: 'string', description: 'Repository description.' },
-      private: { type: 'boolean', description: 'Create a private repository; defaults to the account default.' },
-    },
-    output: {
-      schema: createdRepoSchema,
-      render: (_args, created: { path: string; webUrl: string }) => [
-        { type: 'text', text: `Created repository ${created.path} — ${created.webUrl}` },
-      ],
-    },
-    presentCall(args): GenericCallView {
-      return { card: 'generic', title: `Create GitHub repository ${args.name}`, kind: 'edit' }
-    },
-    async execute(args, exec) {
-      const client = clientFor(args.site, 'github_create_repo', 'github') as GitHubClient
-      return client.createRepo({ ...args, signal: exec.signal })
-    },
-  }))
-
-  // Gitee, Gitea, and Bitbucket share one tool shape (repos / file / issues /
-  // pull_requests) with per-provider naming and project vocabulary, so a
-  // small factory registers all three providers' tools from the same
-  // definitions. GitLab and GitHub above stay spelled out: their argument
-  // sets (membership, iid vs number) differ from this uniform shape.
+  /**
+   * The structural client surface every forge client satisfies: read tools
+   * plus create/modify operations, all returning the canonical shapes.
+   */
   interface ForgeClient {
     listRepos(options: {
       readonly search?: string
@@ -646,19 +242,25 @@ export function apply(ctx: Context, config: PluginConfig): void {
       readonly state?: string
       readonly perPage?: number
       readonly signal?: AbortSignal
-    }): Promise<Array<{ number: number; title: string; state: string; webUrl: string; authorName: string }>>
+    }): Promise<IterationEntry[]>
     listPullRequests(options: {
       readonly project?: string
       readonly state?: string
       readonly perPage?: number
       readonly signal?: AbortSignal
-    }): Promise<Array<{ number: number; title: string; state: string; webUrl: string; authorName: string }>>
+    }): Promise<IterationEntry[]>
+    createRepo(options: {
+      readonly name: string
+      readonly description?: string
+      readonly private?: boolean
+      readonly signal?: AbortSignal
+    }): Promise<{ path: string; visibility: string; webUrl: string }>
     createIssue(options: {
       readonly project?: string
       readonly title: string
       readonly body?: string
       readonly signal?: AbortSignal
-    }): Promise<{ id: number; title: string; webUrl: string }>
+    }): Promise<IterationEntry>
     createPullRequest(options: {
       readonly project?: string
       readonly title: string
@@ -666,51 +268,96 @@ export function apply(ctx: Context, config: PluginConfig): void {
       readonly base: string
       readonly body?: string
       readonly signal?: AbortSignal
-    }): Promise<{ id: number; title: string; webUrl: string }>
-    createRepo(options: {
-      readonly name: string
-      readonly description?: string
-      readonly private?: boolean
-      readonly signal?: AbortSignal
-    }): Promise<{ path: string; webUrl: string }>
+    }): Promise<IterationEntry>
+    closeIssue(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
+    reopenIssue(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
+    commentIssue(options: { readonly project?: string; readonly number: number; readonly body: string; readonly signal?: AbortSignal }): Promise<IterationEntry>
+    mergePull(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
+    closePull(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
   }
 
-  const registerForgeTools = (
-    prefix: 'gitee' | 'gitea' | 'bitbucket',
-    provider: ForgeProvider,
-    label: string,
-    projectHint: string,
-  ): void => {
+  /** Per-provider registration facts. */
+  interface ForgeSpec {
+    readonly prefix: string
+    readonly provider: ForgeProvider
+    readonly label: string
+    readonly projectHint: string
+    /** The list/create tool's kind name: "projects" (GitLab) or "repos" (others). */
+    readonly reposKind: string
+    /** The pull-request tool's kind name: "merge_requests" (GitLab) or "pull_requests" (others). */
+    readonly pullsKind: string
+    /** Which entry schema the provider's issues/PR tools emit. */
+    readonly entrySchema: typeof listEntrySchema | typeof githubEntrySchema
+    /** The default list state name ("opened" on GitLab, "open" elsewhere). */
+    readonly defaultState: string
+    /** GitLab: membership filter on project listing + path/visibility on create. */
+    readonly gitlabExtras?: boolean
+  }
+
+  const registerForgeTools = (spec: ForgeSpec): void => {
+    const { prefix, provider, label, projectHint, reposKind, pullsKind } = spec
     const named = (kind: string): string => `${prefix}_${kind}`
     const client = (args: { site?: string }, tool: string): ForgeClient =>
       clientFor(args.site, tool, provider) as unknown as ForgeClient
 
     ctx.tools.register(defineTool({
-      name: named('repos'),
-      description: `List or search repositories on ${label}. Use to locate a repository (${projectHint}) by name before reading files or listing issues/PRs from it — the token is injected per site.${SITE_DESCRIPTION}`,
+      name: named(reposKind),
+      description: `List/search or create ${label} ${reposKind}. action "list" lists or searches (search?, perPage?${spec.gitlabExtras === true ? ', membership?' : ''}); action "create" creates one (name, description?${spec.gitlabExtras === true ? ', path?, visibility?' : ', private?'}) — the token is injected per site.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
-        search: { type: 'string', description: 'Filter repositories by name.' },
+        action: {
+          type: 'string', enum: ['list', 'create'],
+          description: 'What to do; defaults to "list".',
+        },
+        search: { type: 'string', description: 'Filter repositories whose name or path contains this text.' },
+        ...spec.gitlabExtras === true
+          ? { membership: { type: 'boolean', description: 'Only list projects the token owner belongs to.' } }
+          : {},
         perPage: { type: 'integer', description: 'Maximum number of repositories to return (1-100).' },
+        name: { type: 'string', description: 'Repository/project name (required for create).' },
+        description: { type: 'string', description: 'Repository/project description.' },
+        ...spec.gitlabExtras === true
+          ? {
+            path: { type: 'string', description: 'Project path (defaults to the name).' },
+            visibility: {
+              type: 'string', enum: ['private', 'internal', 'public'],
+              description: 'Project visibility; defaults to the instance default.',
+            },
+          }
+          : { private: { type: 'boolean', description: 'Create a private repository; defaults to the account default.' } },
       },
       output: {
         schema: { type: 'array', items: repoSchema },
-        render: (_args, repos: Array<{ path: string; visibility: string; webUrl: string }>) => repos.length === 0
-          ? [{ type: 'text', text: 'No repositories found.' }]
-          : [{
-            type: 'text',
-            text: repos.map(repo => `${repo.path} (${repo.visibility}) — ${repo.webUrl}`).join('\n'),
-          }],
+        render: renderRepoAction,
       },
       presentCall(args): GenericCallView {
         return {
           card: 'generic',
-          title: `${label} repositories${args.search === undefined ? '' : ` matching ${args.search}`}`,
-          kind: 'search',
+          title: args.action === 'create'
+            ? `Create ${label} ${reposKind.slice(0, -1)} ${args.name ?? ''}`
+            : `${label} ${reposKind}${args.search === undefined ? '' : ` matching ${args.search}`}`,
+          kind: args.action === 'create' ? 'edit' : 'search',
         }
       },
       async execute(args, exec) {
-        return client(args, named('repos')).listRepos({ ...args, signal: exec.signal })
+        const c = client(args, named(reposKind))
+        if (args.action === 'create') {
+          const name = needString(args, 'name', named(reposKind))
+          // GitLab spells the create extras path/visibility; the others use private.
+          const repoInput: Record<string, unknown> = {
+            name,
+            ...(args.description === undefined ? {} : { description: args.description }),
+            ...(spec.gitlabExtras === true
+              ? {
+                ...((args as { path?: string }).path === undefined ? {} : { path: (args as { path?: string }).path }),
+                ...((args as { visibility?: string }).visibility === undefined ? {} : { visibility: (args as { visibility?: string }).visibility }),
+              }
+              : { ...(((args as { private?: boolean }).private) === undefined ? {} : { private: (args as { private?: boolean }).private }) }),
+            signal: exec.signal,
+          }
+          return [await c.createRepo(repoInput as unknown as Parameters<ForgeClient['createRepo']>[0])]
+        }
+        return c.listRepos({ ...(args.search === undefined ? {} : { search: args.search }), ...(args.perPage === undefined ? {} : { perPage: args.perPage }), signal: exec.signal })
       },
     }))
 
@@ -734,7 +381,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
       },
       output: {
         schema: fileSchema,
-        render: (_args, file: { path: string; ref: string; content: string; truncated: boolean }) => [
+        render: (_args, file: GitLabFile | GitHubFile) => [
           { type: 'text', text: file.truncated ? `(truncated) ${file.path}@${file.ref}` : `${file.path}@${file.ref}` },
           { type: 'text', text: file.content },
         ],
@@ -747,173 +394,184 @@ export function apply(ctx: Context, config: PluginConfig): void {
         }
       },
       async execute(args, exec) {
-        return client(args, named('file')).readFile({ ...args, maxBytes: config.fileReadMaxBytes, signal: exec.signal })
+        const c = client(args, named('file'))
+        return c.readFile({ ...args, maxBytes: config.fileReadMaxBytes, signal: exec.signal })
       },
     }))
 
     ctx.tools.register(defineTool({
       name: named('issues'),
-      description: `List issues of a ${label} repository. Use when the user references an issue or asks about open issues — the token is injected per site.${SITE_DESCRIPTION}`,
+      description: `List, create, or modify ${label} issues. action: "list" (project?, state?, perPage?), "create" (title, body?), "close" (number), "reopen" (number), "comment" (number, body) — the token is injected per site.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
+        action: {
+          type: 'string', enum: ['list', 'create', 'close', 'reopen', 'comment'],
+          description: 'What to do; defaults to "list".',
+        },
         project: {
           type: 'string',
           description: `Repository on ${label}, e.g. ${projectHint}; defaults to the site defaultProject when configured.`,
         },
         state: {
-          type: 'string', enum: ['open', 'closed', 'all'],
-          description: 'Filter by state; defaults to open.',
+          type: 'string',
+          description: `Filter by state (${spec.defaultState === 'opened' ? 'opened/closed/all' : 'open/closed/all'}); only for action "list".`,
         },
         perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
+        number: { type: 'integer', description: 'Issue number (required for close/reopen/comment).' },
+        title: { type: 'string', description: 'Issue title (required for create).' },
+        body: { type: 'string', description: 'Issue body or comment text (Markdown).' },
       },
       output: {
-        schema: { type: 'array', items: githubEntrySchema },
-        render: (_args, entries: Array<{ number: number; title: string; state: string; webUrl: string; authorName: string }>) =>
-          entries.length === 0
-            ? [{ type: 'text', text: 'No issues found.' }]
-            : [{
-              type: 'text',
-              text: entries.map(entry => `#${entry.number} [${entry.state}] ${entry.title} — ${entry.authorName} — ${entry.webUrl}`)
-                .join('\n'),
-            }],
+        schema: { type: 'array', items: spec.entrySchema },
+        render: renderEntryAction('issue', 'issues'),
       },
       presentCall(args): GenericCallView {
         return {
           card: 'generic',
-          title: `Issues of ${args.project ?? 'default project'}`,
-          kind: 'search',
+          title: `${(args.action ?? 'list') === 'list' ? 'Issues of' : 'Issue operation on'} ${args.project ?? 'default project'}`,
+          kind: (args.action ?? 'list') === 'list' ? 'search' : 'edit',
         }
       },
       async execute(args, exec) {
-        return client(args, named('issues')).listIssues({ ...args, signal: exec.signal })
+        const c = client(args, named('issues'))
+        switch (args.action ?? 'list') {
+          case 'list':
+            return c.listIssues({ ...(args.project === undefined ? {} : { project: args.project }), ...(args.state === undefined ? {} : { state: args.state }), ...(args.perPage === undefined ? {} : { perPage: args.perPage }), signal: exec.signal })
+          case 'create':
+            return [await c.createIssue({
+              ...(args.project === undefined ? {} : { project: args.project }),
+              title: needString(args, 'title', named('issues')),
+              ...(args.body === undefined ? {} : { body: args.body }),
+              signal: exec.signal,
+            })]
+          case 'close':
+            return [await c.closeIssue({ ...(args.project === undefined ? {} : { project: args.project }), number: needNumber(args, named('issues')), signal: exec.signal })]
+          case 'reopen':
+            return [await c.reopenIssue({ ...(args.project === undefined ? {} : { project: args.project }), number: needNumber(args, named('issues')), signal: exec.signal })]
+          case 'comment':
+            return [await c.commentIssue({
+              ...(args.project === undefined ? {} : { project: args.project }),
+              number: needNumber(args, named('issues')),
+              body: needString(args, 'body', named('issues')),
+              signal: exec.signal,
+            })]
+          default:
+            throw new Error(`${named('issues')}: unknown action ${JSON.stringify(args.action)}; valid: list, create, close, reopen, comment`)
+        }
       },
     }))
 
     ctx.tools.register(defineTool({
-      name: named('pull_requests'),
-      description: `List pull requests of a ${label} repository. Use when the user references a PR, a code review, or asks about open/closed PRs — the token is injected per site.${SITE_DESCRIPTION}`,
+      name: named(pullsKind),
+      description: `List, create, or modify ${label} ${pullsKind === 'merge_requests'
+        ? 'merge requests'
+        : 'pull requests'}. action: "list" (project?, state?, perPage?), "create" (title, head/sourceBranch, base/targetBranch, body?), "merge" (number), "close" (number) — the token is injected per site.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
+        action: {
+          type: 'string', enum: ['list', 'create', 'merge', 'close'],
+          description: 'What to do; defaults to "list".',
+        },
         project: {
           type: 'string',
           description: `Repository on ${label}, e.g. ${projectHint}; defaults to the site defaultProject when configured.`,
         },
         state: {
-          type: 'string', enum: ['open', 'closed', 'all'],
-          description: 'Filter by state; defaults to open.',
+          type: 'string',
+          description: `Filter by state (${spec.defaultState === 'opened' ? 'opened/closed/all/merged' : 'open/closed/all'}); only for action "list".`,
         },
         perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
+        number: { type: 'integer', description: 'PR/MR number (required for merge/close).' },
+        title: { type: 'string', description: 'PR/MR title (required for create).' },
+        head: { type: 'string', description: 'Head/source branch (required for create).' },
+        base: { type: 'string', description: 'Base/target branch, often main or master (required for create).' },
+        body: { type: 'string', description: 'PR/MR description (Markdown).' },
       },
       output: {
-        schema: { type: 'array', items: githubEntrySchema },
-        render: (_args, entries: Array<{ number: number; title: string; state: string; webUrl: string; authorName: string }>) =>
-          entries.length === 0
-            ? [{ type: 'text', text: 'No pull requests found.' }]
-            : [{
-              type: 'text',
-              text: entries.map(entry => `#${entry.number} [${entry.state}] ${entry.title} — ${entry.authorName} — ${entry.webUrl}`)
-                .join('\n'),
-            }],
+        schema: { type: 'array', items: spec.entrySchema },
+        render: renderEntryAction(pullsKind === 'merge_requests' ? 'merge request' : 'pull request', pullsKind === 'merge_requests' ? 'merge requests' : 'pull requests'),
       },
       presentCall(args): GenericCallView {
         return {
           card: 'generic',
-          title: `Pull requests of ${args.project ?? 'default project'}`,
-          kind: 'search',
+          title: `${(args.action ?? 'list') === 'list' ? 'Pull requests of' : 'Pull-request operation on'} ${args.project ?? 'default project'}`,
+          kind: (args.action ?? 'list') === 'list' ? 'search' : 'edit',
         }
       },
       async execute(args, exec) {
-        return client(args, named('pull_requests')).listPullRequests({ ...args, signal: exec.signal })
-      },
-    }))
-
-    ctx.tools.register(defineTool({
-      name: named('create_issue'),
-      description: `Create an issue in a ${label} repository (write operation). Use when the user asks to file a new issue — the token is injected per site.${SITE_DESCRIPTION}`,
-      parameters: {
-        site: siteParameter,
-        project: {
-          type: 'string',
-          description: `Repository on ${label}, e.g. ${projectHint}; defaults to the site defaultProject when configured.`,
-        },
-        title: { type: 'string', required: true, description: 'Issue title.' },
-        body: { type: 'string', description: 'Issue description (Markdown).' },
-      },
-      output: {
-        schema: createdEntrySchema,
-        render: (_args, created: { id: number; title: string; webUrl: string }) => [
-          { type: 'text', text: `Created issue #${created.id}: ${created.title} — ${created.webUrl}` },
-        ],
-      },
-      presentCall(args): GenericCallView {
-        return {
-          card: 'generic',
-          title: `Create issue in ${args.project ?? 'default project'}`,
-          kind: 'edit',
+        const c = client(args, named(pullsKind))
+        switch (args.action ?? 'list') {
+          case 'list':
+            return c.listPullRequests({ ...(args.project === undefined ? {} : { project: args.project }), ...(args.state === undefined ? {} : { state: args.state }), ...(args.perPage === undefined ? {} : { perPage: args.perPage }), signal: exec.signal })
+          case 'create':
+            return [await c.createPullRequest({
+              ...(args.project === undefined ? {} : { project: args.project }),
+              title: needString(args, 'title', named(pullsKind)),
+              head: needString(args, 'head', named(pullsKind)),
+              base: needString(args, 'base', named(pullsKind)),
+              ...(args.body === undefined ? {} : { body: args.body }),
+              signal: exec.signal,
+            })]
+          case 'merge':
+            return [await c.mergePull({ ...(args.project === undefined ? {} : { project: args.project }), number: needNumber(args, named(pullsKind)), signal: exec.signal })]
+          case 'close':
+            return [await c.closePull({ ...(args.project === undefined ? {} : { project: args.project }), number: needNumber(args, named(pullsKind)), signal: exec.signal })]
+          default:
+            throw new Error(`${named(pullsKind)}: unknown action ${JSON.stringify(args.action)}; valid: list, create, merge, close`)
         }
-      },
-      async execute(args, exec) {
-        return client(args, named('create_issue')).createIssue({ ...args, signal: exec.signal })
-      },
-    }))
-
-    ctx.tools.register(defineTool({
-      name: named('create_pull_request'),
-      description: `Create a pull request in a ${label} repository (write operation). Use when the user asks to open a PR — the token is injected per site.${SITE_DESCRIPTION}`,
-      parameters: {
-        site: siteParameter,
-        project: {
-          type: 'string',
-          description: `Repository on ${label}, e.g. ${projectHint}; defaults to the site defaultProject when configured.`,
-        },
-        title: { type: 'string', required: true, description: 'Pull-request title.' },
-        head: { type: 'string', required: true, description: 'Head branch (the changes).' },
-        base: { type: 'string', required: true, description: 'Base branch (often main or master).' },
-        body: { type: 'string', description: 'Pull-request description (Markdown).' },
-      },
-      output: {
-        schema: createdEntrySchema,
-        render: (_args, created: { id: number; title: string; webUrl: string }) => [
-          { type: 'text', text: `Created pull request #${created.id}: ${created.title} — ${created.webUrl}` },
-        ],
-      },
-      presentCall(args): GenericCallView {
-        return {
-          card: 'generic',
-          title: `Create pull request in ${args.project ?? 'default project'}`,
-          kind: 'edit',
-        }
-      },
-      async execute(args, exec) {
-        return client(args, named('create_pull_request')).createPullRequest({ ...args, signal: exec.signal })
-      },
-    }))
-
-    ctx.tools.register(defineTool({
-      name: named('create_repo'),
-      description: `Create a repository under the token owner on ${label} (write operation). Use when the user asks to create a new repository — the token is injected per site.${SITE_DESCRIPTION}`,
-      parameters: {
-        site: siteParameter,
-        name: { type: 'string', required: true, description: 'Repository name.' },
-        description: { type: 'string', description: 'Repository description.' },
-        private: { type: 'boolean', description: 'Create a private repository; defaults to the account default.' },
-      },
-      output: {
-        schema: createdRepoSchema,
-        render: (_args, created: { path: string; webUrl: string }) => [
-          { type: 'text', text: `Created repository ${created.path} — ${created.webUrl}` },
-        ],
-      },
-      presentCall(args): GenericCallView {
-        return { card: 'generic', title: `Create ${label} repository ${args.name}`, kind: 'edit' }
-      },
-      async execute(args, exec) {
-        return client(args, named('create_repo')).createRepo({ ...args, signal: exec.signal })
       },
     }))
   }
 
-  registerForgeTools('gitee', 'gitee', 'Gitee', 'owner/repo')
-  registerForgeTools('gitea', 'gitea', 'Gitea', 'owner/repo')
-  registerForgeTools('bitbucket', 'bitbucket', 'Bitbucket', 'workspace/repo')
+  registerForgeTools({
+    prefix: 'gitlab',
+    provider: 'gitlab',
+    label: 'GitLab',
+    projectHint: 'group/subgroup/project',
+    reposKind: 'projects',
+    pullsKind: 'merge_requests',
+    entrySchema: listEntrySchema,
+    defaultState: 'opened',
+    gitlabExtras: true,
+  })
+  registerForgeTools({
+    prefix: 'github',
+    provider: 'github',
+    label: 'GitHub',
+    projectHint: 'owner/repo',
+    reposKind: 'repos',
+    pullsKind: 'pull_requests',
+    entrySchema: githubEntrySchema,
+    defaultState: 'open',
+  })
+  registerForgeTools({
+    prefix: 'gitee',
+    provider: 'gitee',
+    label: 'Gitee',
+    projectHint: 'owner/repo',
+    reposKind: 'repos',
+    pullsKind: 'pull_requests',
+    entrySchema: githubEntrySchema,
+    defaultState: 'open',
+  })
+  registerForgeTools({
+    prefix: 'gitea',
+    provider: 'gitea',
+    label: 'Gitea',
+    projectHint: 'owner/repo',
+    reposKind: 'repos',
+    pullsKind: 'pull_requests',
+    entrySchema: githubEntrySchema,
+    defaultState: 'open',
+  })
+  registerForgeTools({
+    prefix: 'bitbucket',
+    provider: 'bitbucket',
+    label: 'Bitbucket',
+    projectHint: 'workspace/repo',
+    reposKind: 'repos',
+    pullsKind: 'pull_requests',
+    entrySchema: githubEntrySchema,
+    defaultState: 'open',
+  })
 }

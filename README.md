@@ -56,7 +56,7 @@ Losing the key file means the data is unrecoverable (decryption fails loud and r
 Download `dsh-git-credentials-<version>.tgz` from the [releases page](https://github.com/revive/dsh-git-credentials/releases) — the tarball ships the built browser bundle, so no harness checkout or build step is needed — then install it into a profile with the `dsh` CLI:
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.1.2.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.2.0.tgz
 ```
 
 The first use initializes the profile, pnpm links the package, and `dsh` appends the plugin to the profile's bundle layers. Verify the layer without booting:
@@ -101,55 +101,39 @@ Manage sites and tokens in **Settings → Git Credentials**:
 
 ### Tools
 
-| Tool | Arguments | Returns |
-|---|---|---|
-| `gitlab_projects` | `site?`, `search?`, `membership?`, `perPage?` | project summary array |
-| `gitlab_file` | `site?`, `project`, `path`, `ref?` | `{ path, ref, content, truncated }` |
-| `gitlab_merge_requests` | `site?`, `project?`, `state?`, `perPage?` | MR summary array |
-| `gitlab_issues` | `site?`, `project?`, `state?`, `perPage?` | issue summary array |
-| `github_repos` | `site?`, `search?`, `perPage?` | repository summary array |
-| `github_file` | `site?`, `project` (owner/repo), `path`, `ref?` | `{ path, ref, content, truncated }` |
-| `github_issues` | `site?`, `project?`, `state?`, `perPage?` | issue summary array (PRs excluded) |
-| `github_pull_requests` | `site?`, `project?`, `state?`, `perPage?` | PR summary array |
-| `gitee_repos` | `site?`, `search?`, `perPage?` | repository summary array |
-| `gitee_file` | `site?`, `project` (owner/repo), `path`, `ref?` | `{ path, ref, content, truncated }` |
-| `gitee_issues` | `site?`, `project?`, `state?`, `perPage?` | issue summary array |
-| `gitee_pull_requests` | `site?`, `project?`, `state?`, `perPage?` | PR summary array |
-| `gitea_repos` | `site?`, `search?`, `perPage?` | repository summary array |
-| `gitea_file` | `site?`, `project` (owner/repo), `path`, `ref?` | `{ path, ref, content, truncated }` |
-| `gitea_issues` | `site?`, `project?`, `state?`, `perPage?` | issue summary array |
-| `gitea_pull_requests` | `site?`, `project?`, `state?`, `perPage?` | PR summary array |
-| `bitbucket_repos` | `site?`, `search?`, `perPage?` | repository summary array |
-| `bitbucket_file` | `site?`, `project` (workspace/repo), `path`, `ref?` | `{ path, ref, content, truncated }` |
-| `bitbucket_issues` | `site?`, `project?`, `state?`, `perPage?` | issue summary array |
-| `bitbucket_pull_requests` | `site?`, `project?`, `state?`, `perPage?` | PR summary array |
+One resource tool per provider, with an `action` parameter selecting the operation. All actions return the provider's canonical summary shapes (repos: `{id, path, name, webUrl, visibility}`; issues/PRs: `{number|iid, title, state, webUrl, authorName}`; file: `{path, ref, content, truncated}`). Write actions perform a real mutation — the model should confirm with the user before calling them.
 
+| Tool | `action` | Parameters |
+|---|---|---|
+| `gitlab_projects` | `list`, `create` | list: `search?`, `membership?`, `perPage?` · create: `name`, `description?`, `path?`, `visibility?` |
+| `gitlab_file` | `read` | `project`, `path`, `ref?` |
+| `gitlab_merge_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `sourceBranch`, `targetBranch`, `body?` |
+| `gitlab_issues` | `list`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
+| `github_repos` | `list`, `create` | list: `search?`, `perPage?` · create: `name`, `description?`, `private?` |
+| `github_file` | `read` | `project` (owner/repo), `path`, `ref?` |
+| `github_pull_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
+| `github_issues` | `list`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
+| `gitee_repos` | `list`, `create` | list: `search?`, `perPage?` · create: `name`, `description?`, `private?` |
+| `gitee_file` | `read` | `project` (owner/repo), `path`, `ref?` |
+| `gitee_pull_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
+| `gitee_issues` | `list`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
+| `gitea_repos` | `list`, `create` | list: `search?`, `perPage?` · create: `name`, `description?`, `private?` |
+| `gitea_file` | `read` | `project` (owner/repo), `path`, `ref?` |
+| `gitea_pull_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
+| `gitea_issues` | `list`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
+| `bitbucket_repos` | `list`, `create` | list: `search?`, `perPage?` · create: `name`, `description?`, `private?` |
+| `bitbucket_file` | `read` | `project` (workspace/repo), `path`, `ref?` |
+| `bitbucket_pull_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
+| `bitbucket_issues` | `list`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
+
+- `action` defaults to the read operation (`list`, or `read` for file) — existing read callers keep working unchanged
+- `number` is the issue/PR number (iid on GitLab); required for `close` / `reopen` / `comment` / `merge`
+- `state` values: GitLab `opened`/`closed`/`all` (`merged` for MRs), the others `open`/`closed`/`all`
+- `file` always reads: `project`, `path`, `ref?` (defaults to the repository default branch; content over the byte cap is truncated and flagged)
+- `bitbucket_repos` create needs the site's `defaultProject` (`workspace/repo`) to know which workspace to create in
 - Token reference names are POSIX identifiers (`GITLAB_TOKEN`, `GITHUB_TOKEN`, `GITEE_TOKEN`, `GITEA_TOKEN`, `BITBUCKET_TOKEN`, …); multiple sites can share one reference or use their own
 - GitLab authenticates with the `PRIVATE-TOKEN` header; GitHub, Gitee, and Bitbucket with `Authorization: Bearer` (Gitee additionally falls back to the `access_token` URL parameter when the header form is rejected); Gitea with `Authorization: token`
 - HTTP goes through Node's built-in `fetch` directly — `ctx.web.fetch` is deliberately not used (URL-only, no header support)
-
-**Write tools** — create operations, each returning the created resource summary (`{ id, title, webUrl }`; repos: `{ path, webUrl }`):
-
-| Tool | Parameters | Returns |
-|---|---|---|
-| `gitlab_create_issue` | `site?`, `project`, `title`, `body?` | created issue |
-| `gitlab_create_merge_request` | `site?`, `project?`, `title`, `sourceBranch`, `targetBranch`, `body?` | created MR |
-| `gitlab_create_project` | `site?`, `name`, `path?`, `description?`, `visibility?` | created project |
-| `github_create_issue` | `site?`, `project`, `title`, `body?` | created issue |
-| `github_create_pull_request` | `site?`, `project?`, `title`, `head`, `base`, `body?` | created PR |
-| `github_create_repo` | `site?`, `name`, `description?`, `private?` | created repository |
-| `gitee_create_issue` | `site?`, `project?`, `title`, `body?` | created issue |
-| `gitee_create_pull_request` | `site?`, `project?`, `title`, `head`, `base`, `body?` | created PR |
-| `gitee_create_repo` | `site?`, `name`, `description?`, `private?` | created repository |
-| `gitea_create_issue` | `site?`, `project?`, `title`, `body?` | created issue |
-| `gitea_create_pull_request` | `site?`, `project?`, `title`, `head`, `base`, `body?` | created PR |
-| `gitea_create_repo` | `site?`, `name`, `description?`, `private?` | created repository |
-| `bitbucket_create_issue` | `site?`, `project?`, `title`, `body?` | created issue |
-| `bitbucket_create_pull_request` | `site?`, `project?`, `title`, `head`, `base`, `body?` | created PR |
-| `bitbucket_create_repo` | `site?`, `name`, `description?`, `private?` | created repository |
-
-> `bitbucket_create_repo` needs the site's `defaultProject` (`workspace/repo`) to know which workspace to create in. All write tools perform a real mutation on the forge — the model should confirm with the user before calling them.
-
 ## How it works
 
 ```

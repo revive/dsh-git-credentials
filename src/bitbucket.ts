@@ -246,14 +246,14 @@ export class BitbucketClient {
   /**
    * Create an issue in one repository (write operation).
    * @param options - project (site default when omitted), title, optional body, cancellation.
-   * @returns the created issue summary.
+   * @returns the created issue summary (canonical entry shape).
    */
   async createIssue(options: {
     readonly project?: string
     readonly title: string
     readonly body?: string
     readonly signal?: AbortSignal
-  }): Promise<{ id: number; title: string; webUrl: string }> {
+  }): Promise<BitbucketEntry> {
     const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
     const raw = await this.post<RawIssue>(
       `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/issues`,
@@ -263,13 +263,13 @@ export class BitbucketClient {
       },
       options.signal,
     )
-    return { id: raw.id, title: raw.title, webUrl: raw.links.html.href }
+    return mapIssue(raw)
   }
 
   /**
    * Create a pull request in one repository (write operation).
    * @param options - project (site default when omitted), branches, title, body, cancellation.
-   * @returns the created pull-request summary.
+   * @returns the created pull-request summary (canonical entry shape).
    */
   async createPullRequest(options: {
     readonly project?: string
@@ -278,7 +278,7 @@ export class BitbucketClient {
     readonly base: string
     readonly body?: string
     readonly signal?: AbortSignal
-  }): Promise<{ id: number; title: string; webUrl: string }> {
+  }): Promise<BitbucketEntry> {
     const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
     const raw = await this.post<RawPull>(
       `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/pullrequests`,
@@ -290,28 +290,28 @@ export class BitbucketClient {
       },
       options.signal,
     )
-    return { id: raw.id, title: raw.title, webUrl: raw.links.html.href }
+    return mapPull(raw)
   }
 
   /**
    * Create a repository in the site's workspace (write operation). The
    * workspace comes from the site defaultProject ("workspace/repo").
    * @param options - name, optional description/visibility, cancellation.
-   * @returns the created repository summary.
+   * @returns the created repository summary (canonical repo shape).
    */
   async createRepo(options: {
     readonly name: string
     readonly description?: string
     readonly private?: boolean
     readonly signal?: AbortSignal
-  }): Promise<{ path: string; webUrl: string }> {
+  }): Promise<BitbucketRepo> {
     const workspace = this.site.defaultProject?.split('/')[0] ?? ''
     if (workspace === '') {
       throw new Error(
         `site "${this.site.id}": creating a Bitbucket repository needs a workspace — configure the site defaultProject as "workspace/repo" first`,
       )
     }
-    const raw = await this.post<{ full_name: string; links: { html: { href: string } } }>(
+    const raw = await this.post<RawRepo>(
       `/repositories/${encodeURIComponent(workspace)}`,
       {
         name: options.name,
@@ -320,7 +320,108 @@ export class BitbucketClient {
       },
       options.signal,
     )
-    return { path: raw.full_name, webUrl: raw.links.html.href }
+    return mapRepo(raw)
+  }
+
+  /**
+   * Close an issue (write operation).
+   * @param options - project, issue id, cancellation.
+   * @returns the updated issue summary.
+   */
+  async closeIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<BitbucketEntry> {
+    return this.setIssueState(options, 'closed')
+  }
+
+  /**
+   * Reopen an issue (write operation).
+   * @param options - project, issue id, cancellation.
+   * @returns the updated issue summary.
+   */
+  async reopenIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<BitbucketEntry> {
+    return this.setIssueState(options, 'open')
+  }
+
+  /** Set one issue's state (close/reopen) via the changes endpoint and return the updated entry. */
+  private async setIssueState(
+    options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal },
+    state: 'open' | 'closed',
+  ): Promise<BitbucketEntry> {
+    const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const base = `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/issues/${options.number}`
+    await this.post(`${base}/changes`, { changes: { state: { new: state } } }, options.signal)
+    const raw = await this.get<RawIssue>(base, options.signal === undefined ? {} : { signal: options.signal })
+    return mapIssue(raw)
+  }
+
+  /**
+   * Comment on an issue (write operation).
+   * @param options - project, issue id, comment body, cancellation.
+   * @returns a comment-shaped entry (`state: "comment"`, title = comment body).
+   */
+  async commentIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly body: string
+    readonly signal?: AbortSignal
+  }): Promise<BitbucketEntry> {
+    const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<{
+      id: number
+      content: { raw: string }
+      links: { html: { href: string } }
+      user: { display_name: string } | null
+    }>(
+      `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/issues/${options.number}/comments`,
+      { content: { raw: options.body } },
+      options.signal,
+    )
+    return {
+      number: options.number,
+      title: options.body,
+      state: 'comment',
+      webUrl: raw.links.html.href,
+      authorName: raw.user?.display_name ?? 'unknown',
+    }
+  }
+
+  /**
+   * Merge a pull request (write operation).
+   * @param options - project (site default when omitted), PR id, cancellation.
+   * @returns the merged pull-request summary.
+   */
+  async mergePull(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<BitbucketEntry> {
+    const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const base = `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/pullrequests/${options.number}`
+    const raw = await this.post<RawPull>(`${base}/merge`, {}, options.signal)
+    return mapPull({ ...raw, state: 'MERGED' })
+  }
+
+  /**
+   * Decline (close without merging) a pull request (write operation).
+   * @param options - project (site default when omitted), PR id, cancellation.
+   * @returns the declined pull-request summary.
+   */
+  async closePull(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<BitbucketEntry> {
+    const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const base = `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/pullrequests/${options.number}`
+    const raw = await this.post<RawPull>(`${base}/decline`, {}, options.signal)
+    return mapPull({ ...raw, state: 'declined' })
   }
 
   /** One authenticated POST against the Bitbucket 2.0 API. */
@@ -417,4 +518,26 @@ function mapRepo(repo: RawRepo): BitbucketRepo {
 /** URL-encode one file path for the src endpoint (slashes preserved as segments). */
 function encodePath(path: string): string {
   return path.split('/').map(segment => encodeURIComponent(segment)).join('/')
+}
+
+/** Map one raw issue to the canonical summary. */
+function mapIssue(issue: RawIssue): BitbucketEntry {
+  return {
+    number: issue.id,
+    title: issue.title,
+    state: issue.state,
+    webUrl: issue.links.html.href,
+    authorName: issue.reporter?.display_name ?? 'unknown',
+  }
+}
+
+/** Map one raw pull request to the canonical summary. */
+function mapPull(pull: RawPull): BitbucketEntry {
+  return {
+    number: pull.id,
+    title: pull.title,
+    state: pull.state,
+    webUrl: pull.links.html.href,
+    authorName: pull.author?.display_name ?? 'unknown',
+  }
 }
