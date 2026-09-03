@@ -56,7 +56,7 @@ Losing the key file means the data is unrecoverable (decryption fails loud and r
 Download `dsh-git-credentials-<version>.tgz` from the [releases page](https://github.com/revive/dsh-git-credentials/releases) — the tarball ships the built browser bundle, so no harness checkout or build step is needed — then install it into a profile with the `dsh` CLI:
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.3.0.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.3.1.tgz
 ```
 
 The first use initializes the profile, pnpm links the package, and `dsh` appends the plugin to the profile's bundle layers. Verify the layer without booting:
