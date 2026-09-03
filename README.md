@@ -205,7 +205,7 @@ git-credentials/
 
 The package is shaped as a dsh **bundle**: `dsh.bundle.patch` points at `cordis.patch.yml`, so users install it with `dsh plugin --profile <name> add dsh-git-credentials` and it joins the profile's bundle layers. The runtime resolves the plugin's `@deepseek-ai/*` imports from the installation's flat fallback (`$DSH_HOME/profiles/node_modules`), so the peerDependencies declare the **published** version line (`@deepseek-ai/cordis ^4.0.1-rc.1`, `@deepseek-ai/dsh-tools ^0.0.1-rc.1`, `@deepseek-ai/schemastery ^3.18.1-rc.1`) — never the dev-workspace `0.1.0-rc.5` versions.
 
-**Every GitHub release attaches the packed tarball** — that is the current distribution channel (npm publication is pending account 2FA). A release is produced like this:
+**Every GitHub release attaches the packed tarball** — that is the current distribution channel (npm publication is pending account 2FA). Pushing a `v*` tag triggers [GitHub Actions](.github/workflows/release.yml) to build the node half + browser bundle in the cloud, pack the tarball, and attach it to the release. The same pipeline, by hand:
 
 ```sh
 # Build the node half + browser bundle (self-contained, no harness checkout

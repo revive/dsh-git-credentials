@@ -1,0 +1,7 @@
+# The runtime @deepseek-ai/* peers are provided by the dsh installation
+# (flat fallback), never installed here — the build externalizes them. Keep
+# `pnpm install` (CI and local) to the self-contained toolchain only.
+packages:
+  - .
+nodeLinker: hoisted
+autoInstallPeers: false

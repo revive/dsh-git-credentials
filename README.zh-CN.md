@@ -204,7 +204,7 @@ git-credentials/
 
 包已按 dsh **bundle** 形态组织：`dsh.bundle.patch` 指向 `cordis.patch.yml`，用户执行 `dsh plugin --profile <name> add dsh-git-credentials` 即可安装并加入 profile 的 bundle 层。运行时通过安装自身的 flat fallback（`$DSH_HOME/profiles/node_modules`）解析插件的 `@deepseek-ai/*` 依赖，因此 peerDependencies 声明的是 **npm 已发布版本线**（`@deepseek-ai/cordis ^4.0.1-rc.1`、`@deepseek-ai/dsh-tools ^0.0.1-rc.1`、`@deepseek-ai/schemastery ^3.18.1-rc.1`）——切勿用开发工作区的 `0.1.0-rc.5` 版本。
 
-**每个 GitHub release 都会附带打包好的 tarball**——这是当前的分发渠道（npm 发布因账号 2FA 暂缓）。发布流程：
+**每个 GitHub release 都会附带打包好的 tarball**——这是当前的分发渠道（npm 发布因账号 2FA 暂缓）。推送 `v*` tag 会触发 [GitHub Actions](.github/workflows/release.yml) 在云端构建 node 半 + 浏览器 bundle、打包 tarball 并挂到 release。同一流程手动执行：
 
 ```sh
 # 先构建 node 半 + 浏览器 bundle（自包含，不需要 harness 检出），再打包

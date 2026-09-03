@@ -58,10 +58,9 @@
     "@deepseek-ai/schemastery": "^3.18.1-rc.1"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "0.1.0-rc.5",
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.5",
-    "@deepseek-ai/dsh-schemastery": "0.1.0-rc.5",
-    "@deepseek-ai/dsh-app-boot": "0.1.0-rc.5",
-    "@deepseek-ai/dsh-invariants": "0.1.0-rc.5"
-  }
+    "tsdown": "^0.22.2",
+    "react": "^18.3.1",
+    "@types/react": "^18.3.12"
+  },
+  "packageManager": "pnpm@11.7.0"
 }

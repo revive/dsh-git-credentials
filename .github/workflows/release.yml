@@ -1,0 +1,65 @@
+name: release
+
+# Build the tarball in the cloud and attach it to a GitHub Release whenever a
+# v* tag is pushed (e.g. `git tag v0.3.1 && git push origin v0.3.1`).
+#
+# The build is self-contained: `pnpm build` (tsdown) compiles the node half and
+# the browser bundle from source with no deepseek-harness checkout needed.
+# Typecheck and the smoke test require a harness checkout and are intentionally
+# not part of CI (see Development in the README).
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify tag matches package version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          if [ "$VERSION" != "$PKG" ]; then
+            echo "tag $TAG does not match package.json version $PKG"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build node half + browser bundle
+        run: pnpm build
+
+      - name: Pack tarball
+        run: pnpm pack
+
+      - name: Create/update release and attach tarball
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          TGZ="dsh-git-credentials-${{ env.version }}.tgz"
+          # The release may already exist (e.g. created via the plugin's
+          # github_releases tool) — attach the asset to it in that case.
+          gh release create "$TAG" \
+            --title "dsh-git-credentials ${{ env.version }}" \
+            --notes "Automated build from GitHub Actions: node half + browser bundle packed into \`$TGZ\`. Install with \`dsh plugin --profile <name> add ./$TGZ\` and restart the GUI." >/dev/null 2>&1 || true
+          gh release upload "$TAG" "$TGZ" --clobber
