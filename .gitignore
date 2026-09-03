@@ -21,3 +21,6 @@ tsconfig.json
 
 # npm cache (local dry-run artifact)
 .npm-cache/
+
+# Editor/worktree state
+.worx-state.json

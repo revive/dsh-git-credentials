@@ -56,7 +56,7 @@ Losing the key file means the data is unrecoverable (decryption fails loud and r
 Download `dsh-git-credentials-<version>.tgz` from the [releases page](https://github.com/revive/dsh-git-credentials/releases) — the tarball ships the built browser bundle, so no harness checkout or build step is needed — then install it into a profile with the `dsh` CLI:
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.2.2.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.3.0.tgz
 ```
 
 The first use initializes the profile, pnpm links the package, and `dsh` appends the plugin to the profile's bundle layers. Verify the layer without booting:
@@ -121,6 +121,10 @@ One resource tool per provider, with an `action` parameter selecting the operati
 | `gitea_file` | `read` | `project` (owner/repo), `path`, `ref?` |
 | `gitea_pull_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
 | `gitea_issues` | `list`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
+| `gitlab_releases` | `list`, `create`, `delete` | `project?`, `perPage?`, `tag` (create requires; delete deletes by tag on GitLab), `name?`, `body?`, `draft?`, `prerelease?` |
+| `github_releases` | `list`, `create`, `delete` | `project?`, `perPage?`, `tag`, `number` (release id, required for delete), `name?`, `body?`, `draft?`, `prerelease?` |
+| `gitee_releases` | `list`, `create`, `delete` | `project?`, `perPage?`, `tag`, `number` (release id, required for delete), `name?`, `body?`, `draft?`, `prerelease?` |
+| `gitea_releases` | `list`, `create`, `delete` | `project?`, `perPage?`, `tag`, `number` (release id, required for delete), `name?`, `body?`, `draft?`, `prerelease?` |
 | `bitbucket_repos` | `list`, `create` | list: `search?`, `perPage?` · create: `name`, `description?`, `private?` |
 | `bitbucket_file` | `read` | `project` (workspace/repo), `path`, `ref?` |
 | `bitbucket_pull_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
@@ -131,6 +135,7 @@ One resource tool per provider, with an `action` parameter selecting the operati
 - `state` values: GitLab `opened`/`closed`/`all` (`merged` for MRs), the others `open`/`closed`/`all`
 - `file` always reads: `project`, `path`, `ref?` (defaults to the repository default branch; content over the byte cap is truncated and flagged)
 - `bitbucket_repos` create needs the site's `defaultProject` (`workspace/repo`) to know which workspace to create in
+- Bitbucket has no releases API, so no `bitbucket_releases` tool; release delete uses the release `number` (GitLab deletes by `tag`)
 - Token reference names are POSIX identifiers (`GITLAB_TOKEN`, `GITHUB_TOKEN`, `GITEE_TOKEN`, `GITEA_TOKEN`, `BITBUCKET_TOKEN`, …); multiple sites can share one reference or use their own
 - GitLab authenticates with the `PRIVATE-TOKEN` header; GitHub, Gitee, and Bitbucket with `Authorization: Bearer` (Gitee additionally falls back to the `access_token` URL parameter when the header form is rejected); Gitea with `Authorization: token`
 - HTTP goes through Node's built-in `fetch` directly — `ctx.web.fetch` is deliberately not used (URL-only, no header support)

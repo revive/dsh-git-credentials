@@ -10,10 +10,11 @@
  * layer.
  *
  * Tool layout: one resource tool per provider (repos / projects, file,
- * issues, pull requests / merge requests), with an `action` parameter that
- * selects list, create, or modify behaviour — issue and pull-request tools
- * cover create/close/reopen/comment and create/merge/close respectively,
- * so the model-side tool table stays compact.
+ * issues, pull requests / merge requests, releases where the platform has
+ * them), with an `action` parameter that selects list, create, or modify
+ * behaviour — issue and pull-request tools cover create/close/reopen/comment
+ * and create/merge/close respectively, so the model-side tool table stays
+ * compact.
  * @module dsh-git-credentials
  */
 
@@ -102,6 +103,20 @@ const fileSchema = {
   additionalProperties: false,
 } as const
 
+/** Canonical shape of one release summary (all providers). */
+const releaseSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'integer' },
+    tag: { type: 'string' },
+    name: { type: 'string' },
+    webUrl: { type: 'string' },
+    draft: { type: 'boolean' },
+    prerelease: { type: 'boolean' },
+  },
+  additionalProperties: false,
+} as const
+
 /** One entry as the loop sees it (iid and number are the two key spellings). */
 interface IterationEntry {
   readonly number?: number
@@ -110,6 +125,16 @@ interface IterationEntry {
   readonly state: string
   readonly webUrl: string
   readonly authorName: string
+}
+
+/** One release as the loop sees it (id absent on GitLab, which keys releases by tag). */
+interface ReleaseEntry {
+  readonly id?: number
+  readonly tag: string
+  readonly name: string
+  readonly webUrl: string
+  readonly draft: boolean
+  readonly prerelease: boolean
 }
 
 /** One repo as the loop sees it. */
@@ -220,6 +245,26 @@ export function apply(ctx: Context, config: PluginConfig): void {
       : [{ type: 'text', text: repos.map(repo => `${repo.path} (${repo.visibility}) — ${repo.webUrl}`).join('\n') }]
   }
 
+  /** Render one releases action result. */
+  const renderReleaseAction = (args: { action?: string }, releases: ReleaseEntry[]): Array<{ type: 'text'; text: string }> => {
+    const action = args.action ?? 'list'
+    const release = releases[0]
+    if (release === undefined) {
+      if (action === 'list') return [{ type: 'text', text: 'No releases found.' }]
+      return [{ type: 'text', text: `${action === 'create' ? 'Created' : 'Deleted'} release (no summary returned)` }]
+    }
+    if (action === 'create') return [{ type: 'text', text: `Created release ${release.tag}: ${release.name} — ${release.webUrl}` }]
+    if (action === 'delete') {
+      return [{ type: 'text', text: `Deleted release ${release.id !== undefined ? `#${release.id}` : release.tag}` }]
+    }
+    return [{
+      type: 'text',
+      text: releases.map(item =>
+        `${item.tag}${item.draft ? ' [draft]' : ''}${item.prerelease ? ' [pre]' : ''} — ${item.name} — ${item.webUrl}`,
+      ).join('\n'),
+    }]
+  }
+
   /**
    * The structural client surface every forge client satisfies: read tools
    * plus create/modify operations, all returning the canonical shapes.
@@ -274,6 +319,26 @@ export function apply(ctx: Context, config: PluginConfig): void {
     commentIssue(options: { readonly project?: string; readonly number: number; readonly body: string; readonly signal?: AbortSignal }): Promise<IterationEntry>
     mergePull(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
     closePull(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
+    listReleases(options: {
+      readonly project?: string
+      readonly perPage?: number
+      readonly signal?: AbortSignal
+    }): Promise<ReleaseEntry[]>
+    createRelease(options: {
+      readonly project?: string
+      readonly tagName: string
+      readonly name?: string
+      readonly body?: string
+      readonly draft?: boolean
+      readonly prerelease?: boolean
+      readonly signal?: AbortSignal
+    }): Promise<ReleaseEntry>
+    deleteRelease(options: {
+      readonly project?: string
+      readonly number?: number
+      readonly tag?: string
+      readonly signal?: AbortSignal
+    }): Promise<ReleaseEntry>
   }
 
   /** Per-provider registration facts. */
@@ -292,6 +357,8 @@ export function apply(ctx: Context, config: PluginConfig): void {
     readonly defaultState: string
     /** GitLab: membership filter on project listing + path/visibility on create. */
     readonly gitlabExtras?: boolean
+    /** Whether the platform has a releases API (Bitbucket does not). */
+    readonly releases?: boolean
   }
 
   const registerForgeTools = (spec: ForgeSpec): void => {
@@ -539,6 +606,81 @@ export function apply(ctx: Context, config: PluginConfig): void {
         }
       },
     }))
+
+    if (spec.releases !== false) {
+      ctx.tools.register(defineTool({
+        name: named('releases'),
+        description: `List, create, or delete ${label} releases. action: "list" (project?, perPage?), "create" (tag, name?, body?, draft?, prerelease?), "delete" (${spec.gitlabExtras === true ? 'tag' : 'number'}) — the token is injected per site.${SITE_DESCRIPTION}`,
+        parameters: {
+          site: siteParameter,
+          action: {
+            type: 'string', enum: ['list', 'create', 'delete'],
+            description: 'What to do; defaults to "list".',
+          },
+          project: {
+            type: 'string',
+            description: `Repository on ${label}, e.g. ${projectHint}; defaults to the site defaultProject when configured.`,
+          },
+          perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
+          ...(spec.gitlabExtras === true
+            ? { tag: { type: 'string', description: 'Release tag (required for create; delete deletes by tag on GitLab).' } }
+            : {
+              tag: { type: 'string', description: 'Release tag (required for create).' },
+              number: { type: 'integer', description: 'Release id (required for delete).' },
+            }),
+          name: { type: 'string', description: 'Release name (defaults to the tag).' },
+          body: { type: 'string', description: 'Release description/body (Markdown).' },
+          draft: { type: 'boolean', description: 'Create as a draft release.' },
+          prerelease: { type: 'boolean', description: 'Mark as a prerelease.' },
+        },
+        output: {
+          schema: { type: 'array', items: releaseSchema },
+          render: renderReleaseAction,
+        },
+        presentCall(args): GenericCallView {
+          return {
+            card: 'generic',
+            title: `${(args.action ?? 'list') === 'list' ? 'Releases of' : 'Release operation on'} ${args.project ?? 'default project'}`,
+            kind: (args.action ?? 'list') === 'list' ? 'search' : 'edit',
+          }
+        },
+        async execute(args, exec) {
+          const c = client(args, named('releases'))
+          switch (args.action ?? 'list') {
+            case 'list':
+              return c.listReleases({
+                ...(args.project === undefined ? {} : { project: args.project }),
+                ...(args.perPage === undefined ? {} : { perPage: args.perPage }),
+                signal: exec.signal,
+              })
+            case 'create': {
+              const input: Record<string, unknown> = {
+                ...(args.project === undefined ? {} : { project: args.project }),
+                tagName: needString(args, 'tag', named('releases')),
+                ...(args.name === undefined ? {} : { name: args.name }),
+                ...(args.body === undefined ? {} : { body: args.body }),
+                ...(args.draft === undefined ? {} : { draft: args.draft }),
+                ...(args.prerelease === undefined ? {} : { prerelease: args.prerelease }),
+                signal: exec.signal,
+              }
+              return [await c.createRelease(input as unknown as Parameters<ForgeClient['createRelease']>[0])]
+            }
+            case 'delete': {
+              const input: Record<string, unknown> = {
+                ...(args.project === undefined ? {} : { project: args.project }),
+                ...(spec.gitlabExtras === true
+                  ? { tag: needString(args as Record<string, unknown>, 'tag', named('releases')) }
+                  : { number: needNumber(args, named('releases')) }),
+                signal: exec.signal,
+              }
+              return [await c.deleteRelease(input as unknown as Parameters<ForgeClient['deleteRelease']>[0])]
+            }
+            default:
+              throw new Error(`${named('releases')}: unknown action ${JSON.stringify(args.action)}; valid: list, create, delete`)
+          }
+        },
+      }))
+    }
   }
 
   registerForgeTools({
@@ -591,5 +733,6 @@ export function apply(ctx: Context, config: PluginConfig): void {
     pullsKind: 'pull_requests',
     entrySchema: githubEntrySchema,
     defaultState: 'open',
+    releases: false,
   })
 }

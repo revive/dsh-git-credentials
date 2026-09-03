@@ -365,6 +365,102 @@ export class GitLabClient {
     return mapEntry(raw)
   }
 
+  /**
+   * List releases of one project (GitLab keys releases by tag name).
+   * @param options - project (site default when omitted), page size, cancellation.
+   * @returns release summaries (id omitted — GitLab has no numeric release id).
+   */
+  async listReleases(options: {
+    readonly project?: string
+    readonly perPage?: number
+    readonly signal?: AbortSignal
+  }): Promise<Array<{ tag: string; name: string; webUrl: string; draft: boolean; prerelease: boolean }>> {
+    const project = this.resolveProject(options.project)
+    const raw = await this.get<Array<{ tag_name: string; name: string | null }>>(
+      `/projects/${encodeURIComponent(project)}/releases`,
+      {
+        params: { per_page: pageSize(options.perPage) },
+        ...options.signal === undefined ? {} : { signal: options.signal },
+      },
+    )
+    return raw.map(release => ({
+      tag: release.tag_name,
+      name: release.name ?? release.tag_name,
+      webUrl: `${this.site.baseUrl.replace(/\/+$/, '')}/${project}/-/releases/${encodeURIComponent(release.tag_name)}`,
+      draft: false,
+      prerelease: false,
+    }))
+  }
+
+  /**
+   * Create a release for one tag (write operation).
+   * @param options - project (site default when omitted), tag, optional name/body, cancellation.
+   * @returns the created release summary.
+   */
+  async createRelease(options: {
+    readonly project?: string
+    readonly tagName: string
+    readonly name?: string
+    readonly body?: string
+    readonly signal?: AbortSignal
+  }): Promise<{ tag: string; name: string; webUrl: string; draft: boolean; prerelease: boolean }> {
+    const project = this.resolveProject(options.project)
+    const raw = await this.post<{ tag_name: string; name: string | null }>(
+      `/projects/${encodeURIComponent(project)}/releases`,
+      {
+        tag_name: options.tagName,
+        ...options.name === undefined ? {} : { name: options.name },
+        ...options.body === undefined ? {} : { description: options.body },
+      },
+      options.signal,
+    )
+    return {
+      tag: raw.tag_name,
+      name: raw.name ?? raw.tag_name,
+      webUrl: `${this.site.baseUrl.replace(/\/+$/, '')}/${project}/-/releases/${encodeURIComponent(raw.tag_name)}`,
+      draft: false,
+      prerelease: false,
+    }
+  }
+
+  /**
+   * Delete a release by its tag name (write operation).
+   * @param options - project (site default when omitted), tag, cancellation.
+   * @returns a stub summary of the deleted release.
+   */
+  async deleteRelease(options: {
+    readonly project?: string
+    readonly tag: string
+    readonly signal?: AbortSignal
+  }): Promise<{ tag: string; name: string; webUrl: string; draft: boolean; prerelease: boolean }> {
+    const project = this.resolveProject(options.project)
+    await this.del(`/projects/${encodeURIComponent(project)}/releases/${encodeURIComponent(options.tag)}`, options.signal)
+    return { tag: options.tag, name: 'deleted', webUrl: '', draft: false, prerelease: false }
+  }
+
+  /** One authenticated DELETE against the GitLab REST API. */
+  private async del(path: string, signal?: AbortSignal): Promise<void> {
+    const token = this.token()
+    const url = new URL(`/api/v4${path}`, this.site.baseUrl)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'PRIVATE-TOKEN': token },
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch (error) {
+      throw new Error(`GitLab site "${this.site.id}": request to ${path} failed: ${errorMessage(error)}`)
+    }
+    if (!response.ok) {
+      const detail = await errorDetail(response)
+      const hint = response.status === 401
+        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        : ''
+      throw new Error(`GitLab site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
+    }
+  }
+
   /** One authenticated PUT against the GitLab REST API. */
   private async put<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const token = this.token()

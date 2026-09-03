@@ -56,7 +56,7 @@ GitHub 发布了官方 MCP server，harness 也原生支持 MCP 客户端——�
 从 [releases 页面](https://github.com/revive/dsh-git-credentials/releases) 下载 `dsh-git-credentials-<version>.tgz`——tarball 自带构建好的浏览器 bundle，无需 harness 检出、无需构建——然后用 `dsh` CLI 装进 profile：
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.2.2.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.3.0.tgz
 ```
 
 首次使用会初始化 profile、pnpm 链接包，`dsh` 自动把插件追加进 profile 的 bundle 层。不 boot 先验证层：
@@ -121,6 +121,10 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 | `gitea_file` | `read` | `project`（owner/repo）、`path`、`ref?` |
 | `gitea_pull_requests` | `list`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
 | `gitea_issues` | `list`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
+| `gitlab_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`（create 必需；GitLab 按 tag 删除）、`name?`、`body?`、`draft?`、`prerelease?` |
+| `github_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`、`number`（release id，delete 必需）、`name?`、`body?`、`draft?`、`prerelease?` |
+| `gitee_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`、`number`（release id，delete 必需）、`name?`、`body?`、`draft?`、`prerelease?` |
+| `gitea_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`、`number`（release id，delete 必需）、`name?`、`body?`、`draft?`、`prerelease?` |
 | `bitbucket_repos` | `list`、`create` | list: `search?`、`perPage?` · create: `name`、`description?`、`private?` |
 | `bitbucket_file` | `read` | `project`（workspace/repo）、`path`、`ref?` |
 | `bitbucket_pull_requests` | `list`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
@@ -131,6 +135,7 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 - `state` 取值：GitLab `opened`/`closed`/`all`（MR 另有 `merged`），其余平台 `open`/`closed`/`all`
 - `file` 恒为读取：`project`、`path`、`ref?`（默认分支；超过字节上限截断并标记）
 - `bitbucket_repos` 的 create 需要站点 `defaultProject`（`workspace/repo`）才能确定 workspace
+- Bitbucket 没有 releases API，因此没有 `bitbucket_releases` 工具；release 的 delete 用 release `number`（GitLab 按 `tag` 删除）
 - token 引用名是 POSIX 标识符（`GITLAB_TOKEN`、`GITHUB_TOKEN`、`GITEE_TOKEN`、`GITEA_TOKEN`、`BITBUCKET_TOKEN`…），多站点可各配各的 ref，或共享一个 ref
 - GitLab 用 `PRIVATE-TOKEN` 头；GitHub、Gitee、Bitbucket 用 `Authorization: Bearer`（Gitee 在头被拒绝时自动兜底 `access_token` URL 参数）；Gitea 用 `Authorization: token`
 - HTTP 走 Node 内置 `fetch` 直连——刻意不用 `ctx.web.fetch`（只收 URL、无 header）
