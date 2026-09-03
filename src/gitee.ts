@@ -361,6 +361,109 @@ export class GiteeClient {
     return mapEntry(raw)
   }
 
+  /**
+   * List releases of one repository.
+   * @param options - project (site default when omitted), page size, cancellation.
+   * @returns release summaries.
+   */
+  async listReleases(options: {
+    readonly project?: string
+    readonly perPage?: number
+    readonly signal?: AbortSignal
+  }): Promise<Array<{ id: number; tag: string; name: string; webUrl: string; draft: boolean; prerelease: boolean }>> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.get<Array<{
+      id: number; tag_name: string; name: string | null; html_url: string; draft: boolean; prerelease: boolean
+    }>>(`/repos/${owner}/${repo}/releases`, {
+      params: { per_page: pageSize(options.perPage) },
+      ...options.signal === undefined ? {} : { signal: options.signal },
+    })
+    return raw.map(release => ({
+      id: release.id,
+      tag: release.tag_name,
+      name: release.name ?? release.tag_name,
+      webUrl: release.html_url,
+      draft: release.draft,
+      prerelease: release.prerelease,
+    }))
+  }
+
+  /**
+   * Create a release for one tag (write operation).
+   * @param options - project (site default when omitted), tag, optional name/body/flags, cancellation.
+   * @returns the created release summary.
+   */
+  async createRelease(options: {
+    readonly project?: string
+    readonly tagName: string
+    readonly name?: string
+    readonly body?: string
+    readonly draft?: boolean
+    readonly prerelease?: boolean
+    readonly signal?: AbortSignal
+  }): Promise<{ id: number; tag: string; name: string; webUrl: string; draft: boolean; prerelease: boolean }> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<{
+      id: number; tag_name: string; name: string | null; html_url: string; draft: boolean; prerelease: boolean
+    }>(`/repos/${owner}/${repo}/releases`, {
+      tag_name: options.tagName,
+      ...options.name === undefined ? {} : { name: options.name },
+      ...options.body === undefined ? {} : { body: options.body },
+      ...options.draft === undefined ? {} : { draft: options.draft },
+      ...options.prerelease === undefined ? {} : { prerelease: options.prerelease },
+    }, options.signal)
+    return {
+      id: raw.id,
+      tag: raw.tag_name,
+      name: raw.name ?? raw.tag_name,
+      webUrl: raw.html_url,
+      draft: raw.draft,
+      prerelease: raw.prerelease,
+    }
+  }
+
+  /**
+   * Delete a release by its release id (write operation).
+   * @param options - project (site default when omitted), release id, cancellation.
+   * @returns a stub summary of the deleted release.
+   */
+  async deleteRelease(options: {
+    readonly project?: string
+    readonly number: number
+    readonly signal?: AbortSignal
+  }): Promise<{ id: number; tag: string; name: string; webUrl: string; draft: boolean; prerelease: boolean }> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    await this.del(`/repos/${owner}/${repo}/releases/${options.number}`, options.signal)
+    return { id: options.number, tag: '', name: 'deleted', webUrl: '', draft: false, prerelease: false }
+  }
+
+  /** One authenticated DELETE against the Gitee API. */
+  private async del(path: string, signal?: AbortSignal, queryAuth = false): Promise<void> {
+    const token = tokenFor(this.tokens, this.site)
+    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    if (queryAuth) url.searchParams.set('access_token', token)
+    let response: Response
+    try {
+      response = await fetch(url, {
+        method: 'DELETE',
+        headers: queryAuth
+          ? { 'Accept': 'application/json', 'User-Agent': 'dsh-git-credentials' }
+          : { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json', 'User-Agent': 'dsh-git-credentials' },
+        ...signal === undefined ? {} : { signal },
+      })
+    } catch (error) {
+      throw new Error(`site "${this.site.id}": request to ${path} failed: ${errorMessage(error)}`)
+    }
+    if (response.status === 401 && !queryAuth) return this.del(path, signal, true)
+    if (!response.ok) {
+      const detail = await errorDetail(response)
+      const hint = response.status === 401
+        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        : ''
+      throw new Error(`site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
+    }
+  }
+
   /** One authenticated PATCH against the Gitee API. */
   private async patch<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     return this.write<T>('PATCH', path, body, signal)

@@ -113,14 +113,23 @@ try {
     'createRepo', 'createIssue', 'createPullRequest',
     'closeIssue', 'reopenIssue', 'commentIssue', 'mergePull', 'closePull',
   ] as const
-  for (const ctor of [GitLabClient, GitHubClient, GiteeClient, GiteaClient, BitbucketClient]) {
+  // Bitbucket has no releases API, so it is exempt from the release methods.
+  const RELEASE_SURFACE = ['listReleases', 'createRelease', 'deleteRelease'] as const
+  const surfaces: Array<{ ctor: new () => object; methods: readonly string[] }> = [
+    { ctor: GitLabClient, methods: [...SURFACE, ...RELEASE_SURFACE] },
+    { ctor: GitHubClient, methods: [...SURFACE, ...RELEASE_SURFACE] },
+    { ctor: GiteeClient, methods: [...SURFACE, ...RELEASE_SURFACE] },
+    { ctor: GiteaClient, methods: [...SURFACE, ...RELEASE_SURFACE] },
+    { ctor: BitbucketClient, methods: SURFACE },
+  ]
+  for (const { ctor, methods } of surfaces) {
     const probe = Object.create(ctor.prototype) as Record<string, unknown>
-    for (const method of SURFACE) {
+    for (const method of methods) {
       if (typeof probe[method] !== 'function') {
         throw new Error(`${ctor.name} is missing the forge-surface method ${method}`)
       }
     }
-    console.log(`ok: ${ctor.name} implements the full forge surface`)
+    console.log(`ok: ${ctor.name} implements the forge surface`)
   }
 
   // Fail-loud without a configured token: the model must get a clear error,
