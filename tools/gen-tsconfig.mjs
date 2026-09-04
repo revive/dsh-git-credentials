@@ -14,6 +14,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // Out-of-tree development needs the harness checkout explicitly; no
 // machine-specific default is baked in.
@@ -23,8 +24,10 @@ if (!REPO) {
     'DSH_REPO must point at a deepseek-harness checkout, e.g. DSH_REPO=/path/to/deepseek-harness',
   )
 }
-// The plugin root: this script lives in tools/.
-const HERE = new URL('..', import.meta.url).pathname
+// The plugin root: this script lives in tools/. `fileURLToPath`, not
+// `URL.pathname` — on Windows the latter yields a leading-slash path
+// ("/C:/plugin/") that `join` then turns into "C:\C:\plugin\".
+const HERE = fileURLToPath(new URL('..', import.meta.url))
 
 const base = JSON.parse(
   readFileSync(join(REPO, 'tsconfig.base.json'), 'utf8')

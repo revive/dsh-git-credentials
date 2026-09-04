@@ -15,6 +15,7 @@ const STORAGE_KEY = 'git-credentials:locale'
 
 /** All panel strings, keyed by the ids used throughout the component. */
 export interface Messages {
+  heading: string
   intro: string
   refresh: string
   saving: string
@@ -36,9 +37,15 @@ export interface Messages {
   noSites: string
   siteIdPlaceholder: string
   addSite: string
+  addSiteHeading: string
+  siteIdLabel: string
+  providerLabel: string
+  tokenValueLabel: string
+  emptyValue: string
 }
 
 const en: Messages = {
+  heading: 'Git Credentials',
   intro: 'Manage Git credentials (GitLab / GitHub / Gitea / Forgejo / Gitee / Bitbucket) here: '
     + "site addresses and tokens are kept in the plugin's own encrypted file "
     + '(AES-256-GCM, separate key file, 0600); token values never enter the model context. '
@@ -63,9 +70,15 @@ const en: Messages = {
   noSites: 'No sites yet. Add your first Git credentials site below.',
   siteIdPlaceholder: 'site id, e.g. corp',
   addSite: 'Add site',
+  addSiteHeading: 'Add a site',
+  siteIdLabel: 'site id',
+  providerLabel: 'provider',
+  tokenValueLabel: 'token value',
+  emptyValue: '—',
 }
 
 const zh: Messages = {
+  heading: 'Git 凭据',
   intro: '在这里管理 Git 凭据（GitLab / GitHub / Gitea / Forgejo / Gitee / Bitbucket）：站点地址与 token 保存在插件'
     + '自己的加密文件（AES-256-GCM，密钥独立文件，0600）中，token 值不会'
     + '进入模型上下文。修改即时生效，无需重启。',
@@ -89,6 +102,11 @@ const zh: Messages = {
   noSites: '还没有站点。在下方添加第一个 Git 凭据站点。',
   siteIdPlaceholder: '站点 id，如 corp',
   addSite: '添加站点',
+  addSiteHeading: '添加站点',
+  siteIdLabel: '站点 id',
+  providerLabel: '平台',
+  tokenValueLabel: 'token 值',
+  emptyValue: '—',
 }
 
 const MESSAGES: Record<Locale, Messages> = { en, zh }

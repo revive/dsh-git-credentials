@@ -105,73 +105,226 @@ interface SiteDraft {
   token: string
 }
 
-/** Field style shared by every input and button row. */
-const fieldStyle: CSSProperties = {
-  marginRight: 8,
-  padding: '4px 8px',
-  borderRadius: 4,
-  border: '1px solid #8884',
-  background: 'transparent',
-  color: 'inherit',
+/**
+ * ── Styling contract ───────────────────────────────────────────────────
+ *
+ * This panel renders inside the host's Settings dialog, right beside the
+ * host's own sections (General, Models, Plugins), so it has to read as one
+ * of them. Every value below mirrors the host's own settings-section CSS:
+ *
+ *   - section: max-width 760, column, 12px gap; 18px/600 heading over a
+ *     13px tertiary intro paragraph
+ *   - card: 12px radius, 1px `--dsw-alias-border-l2` on
+ *     `--dsw-alias-bg-layer-3`, 14px/16px padding, 10px between cards
+ *   - type scale: 15px/600 card title, 13px body, 12px captions
+ *   - controls: 32px tall, 8px radius, 13px text
+ *   - color: `--dsw-*` design tokens only (each with a hex fallback so the
+ *     panel still renders if the host renames a token), never raw hexes
+ *
+ * Two rules carry the layout. Read-only values render as plain text (the
+ * host's code font for URLs and token references), never as input-shaped
+ * boxes — a disabled-looking box invites a click that does nothing. And
+ * value columns are a responsive auto-fit grid with `minWidth: 0`, not
+ * fixed pixel widths, so a long base URL such as
+ * `https://git.example.org/api/v1` stays fully readable.
+ */
+const COLOR = {
+  text: 'var(--dsw-alias-label-primary, #cdd6f4)',
+  secondary: 'var(--dsw-alias-label-secondary, #a6adc8)',
+  tertiary: 'var(--dsw-alias-label-tertiary, #9399b2)',
+  border: 'var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.12))',
+  card: 'var(--dsw-alias-bg-layer-3, #313244)',
+  field: 'var(--dsw-specific-input-major, #1e1e2e)',
+  success: 'var(--dsw-alias-state-success-primary, #a6e3a1)',
+  danger: 'var(--dsw-alias-state-error-primary, #f38ba8)',
+} as const
+
+/** The host's code font, for URLs and token reference names. */
+const CODE_FONT = 'var(--ds-font-family-code, ui-monospace, SFMono-Regular, Consolas, monospace)'
+
+/** Control height matching the host's 13px/8px-radius buttons. */
+const CONTROL_HEIGHT = 32
+
+/** The whole panel: the host's settings-section box. */
+const sectionStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  maxWidth: 760,
+  color: COLOR.text,
 }
 
-/** Secondary action: edit, cancel, save-token, clear-token — outlined, same visual weight as before. */
-const buttonStyle: CSSProperties = {
-  padding: '4px 12px',
-  borderRadius: 4,
-  border: '1px solid #8884',
-  background: 'transparent',
-  color: 'inherit',
-  cursor: 'pointer',
+/** Heading row: section title on the left, locale switcher pinned right. */
+const headingRowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 12,
 }
 
-/** Primary action: the one commit button per row (Save / Add site) — visually distinct from secondary actions. */
-const primaryButtonStyle: CSSProperties = {
-  ...buttonStyle,
-  border: '1px solid #2f6feb99',
-  background: '#2f6feb1f',
-  color: '#2f6feb',
+/** Section title, matching the host's `<h2>`. */
+const headingStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 18,
   fontWeight: 600,
 }
 
-/** Destructive action: delete a site — kept visually separate (color + right alignment) from routine actions. */
+/** Intro paragraph, matching the host's section intro. */
+const introStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 13,
+  lineHeight: 1.5,
+  color: COLOR.tertiary,
+}
+
+/** Field style shared by every input and select; `height` (not `minHeight`) so inputs, selects, and buttons line up exactly. */
+const fieldStyle: CSSProperties = {
+  height: CONTROL_HEIGHT,
+  minWidth: 0,
+  padding: '0 10px',
+  boxSizing: 'border-box',
+  borderRadius: 8,
+  border: `1px solid ${COLOR.border}`,
+  background: COLOR.field,
+  color: COLOR.text,
+  fontSize: 13,
+  lineHeight: '20px',
+}
+
+/** Secondary action: refresh, edit, cancel, save-token, clear-token — the host's outlined button. */
+const buttonStyle: CSSProperties = {
+  height: CONTROL_HEIGHT,
+  padding: '0 14px',
+  boxSizing: 'border-box',
+  borderRadius: 8,
+  border: `1px solid ${COLOR.border}`,
+  background: 'transparent',
+  color: COLOR.secondary,
+  cursor: 'pointer',
+  fontSize: 13,
+  whiteSpace: 'nowrap',
+}
+
+/** Primary action: the one commit button per card (Save / Add site) — the host's filled button. */
+const primaryButtonStyle: CSSProperties = {
+  ...buttonStyle,
+  border: '1px solid transparent',
+  background: COLOR.text,
+  color: 'var(--dsw-alias-bg-layer-3, #313244)',
+  fontWeight: 500,
+}
+
+/** Destructive action: delete a site — same shape, danger-toned. */
 const dangerButtonStyle: CSSProperties = {
   ...buttonStyle,
-  border: '1px solid #e5484d88',
-  color: '#e5484d',
+  color: COLOR.danger,
+}
+
+/** The toolbar above the list: refresh plus transient saving/error text. */
+const toolbarStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: 12,
+}
+
+/** The card list: one column, the host's 10px card gap. */
+const cardsStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+}
+
+/** One site's card, and the add-site form. */
+const cardStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  padding: '14px 16px',
+  borderRadius: 12,
+  border: `1px solid ${COLOR.border}`,
+  background: COLOR.card,
+}
+
+/** Card header: title on the left, actions pinned right. */
+const cardHeaderStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  flexWrap: 'wrap',
+  gap: 12,
+}
+
+/** The card title: the site id, or the add-site heading. */
+const cardTitleStyle: CSSProperties = {
+  fontSize: 15,
+  fontWeight: 600,
+  lineHeight: 1.4,
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+}
+
+/** Actions cluster, pinned to the right of whatever row it sits in. */
+const actionsStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
   marginLeft: 'auto',
 }
 
-const rowStyle: CSSProperties = {
+/** The value columns: responsive, so nothing is clipped at a fixed pixel width. */
+const gridStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+  gap: 12,
+}
+
+/** One labelled column inside `gridStyle`. */
+const cellStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+  minWidth: 0,
+}
+
+/** The caption above each value. */
+const labelStyle: CSSProperties = {
+  fontSize: 12,
+  lineHeight: '18px',
+  color: COLOR.tertiary,
+}
+
+/**
+ * A read-only value: plain text, never an input-shaped box. It wraps rather
+ * than truncating — a base URL or token reference is the thing the user came
+ * to check, so hiding its tail behind an ellipsis defeats the panel.
+ */
+const valueStyle: CSSProperties = {
+  fontSize: 13,
+  lineHeight: '20px',
+  paddingTop: 6,
+  minWidth: 0,
+  overflowWrap: 'anywhere',
+}
+
+/** A read-only value that is machine text (URL, token reference). */
+const codeValueStyle: CSSProperties = { ...valueStyle, fontFamily: CODE_FONT }
+
+/** Small supporting text: the token-configured line, the saving/error notes. */
+const metaStyle: CSSProperties = {
+  fontSize: 12,
+  lineHeight: 1.5,
+  color: COLOR.tertiary,
+}
+
+/** The card footer, separated the way the host separates a card's footer. */
+const footerStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   flexWrap: 'wrap',
   gap: 8,
-  padding: '8px 0',
-  borderBottom: '1px solid #8882',
-}
-
-/** One site's block: fields row + actions row stacked, bordered as a unit. */
-const siteBlockStyle: CSSProperties = {
-  padding: '8px 0',
-  borderBottom: '1px solid #8882',
-}
-
-/** A row of inputs/selects within a site block (no border — the block carries it). */
-const fieldsRowStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  flexWrap: 'wrap',
-  gap: 8,
-}
-
-/** A row of buttons within a site block, visually separated from the fields above it. */
-const actionsRowStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  flexWrap: 'wrap',
-  gap: 8,
-  marginTop: 8,
+  paddingTop: 12,
+  borderTop: `1px solid ${COLOR.border}`,
 }
 
 /** GET one admin endpoint. */
@@ -263,10 +416,11 @@ function Loaded(): ReactNode {
 
   const siteIds = Object.keys(state.sites)
   return (
-    <div style={{ maxWidth: 760, fontSize: 14, lineHeight: 1.6 }}>
-      <div style={{ ...rowStyle, justifyContent: 'flex-end', borderBottom: 'none', padding: 0 }}>
+    <div style={sectionStyle}>
+      <div style={headingRowStyle}>
+        <h2 style={headingStyle}>{t.heading}</h2>
         <select
-          style={{ ...fieldStyle, marginRight: 0 }}
+          style={{ ...fieldStyle, marginLeft: 'auto' }}
           value={locale}
           onChange={event => {
             const next = event.target.value as Locale
@@ -279,64 +433,223 @@ function Loaded(): ReactNode {
           ))}
         </select>
       </div>
-      <p style={{ color: '#888' }}>{t.intro}</p>
-      <div style={rowStyle}>
+      <p style={introStyle}>{t.intro}</p>
+      <div style={toolbarStyle}>
         <button style={buttonStyle} onClick={() => void load()} disabled={busy}>{t.refresh}</button>
-        {busy && <span>{t.saving}</span>}
-        {error !== null && <span style={{ color: '#e5484d' }}>{error}</span>}
+        {busy && <span style={metaStyle}>{t.saving}</span>}
+        {error !== null && <span style={{ ...metaStyle, color: COLOR.danger }}>{error}</span>}
       </div>
 
-      {siteIds.map(id => {
-        const site = state.sites[id]!
-        const token = state.tokens[site.tokenRef]
-        const draft = drafts[id] ?? {
-          provider: site.provider,
-          baseUrl: site.baseUrl,
-          tokenRef: site.tokenRef,
-          defaultProject: site.defaultProject ?? '',
-          token: '',
-        }
-        const isEditing = editing[id] === true
-        const status = (
-          <span style={{ color: token?.configured === true ? '#30a46c' : '#e5484d', fontSize: 12 }}>
-            {token?.configured === true ? t.tokenConfigured(token.source ?? '?') : t.tokenNotConfigured}
-          </span>
-        )
-        const beginEdit = (): void => setEditing({ ...editing, [id]: true })
-        const cancelEdit = (): void => {
-          const next = { ...drafts }
-          delete next[id]
-          setDrafts(next)
-          setEditing({ ...editing, [id]: false })
-        }
-        if (!isEditing) {
+      <div style={cardsStyle}>
+        {siteIds.map(id => {
+          const site = state.sites[id]!
+          const token = state.tokens[site.tokenRef]
+          const draft = drafts[id] ?? {
+            provider: site.provider,
+            baseUrl: site.baseUrl,
+            tokenRef: site.tokenRef,
+            defaultProject: site.defaultProject ?? '',
+            token: '',
+          }
+          const isEditing = editing[id] === true
+          const status = (
+            <span style={{ ...metaStyle, color: token?.configured === true ? COLOR.success : COLOR.danger }}>
+              {token?.configured === true ? t.tokenConfigured(token.source ?? '?') : t.tokenNotConfigured}
+            </span>
+          )
+          const beginEdit = (): void => setEditing({ ...editing, [id]: true })
+          const cancelEdit = (): void => {
+            const next = { ...drafts }
+            delete next[id]
+            setDrafts(next)
+            setEditing({ ...editing, [id]: false })
+          }
+          if (!isEditing) {
+            return (
+              <div key={id} style={cardStyle}>
+                <div style={cardHeaderStyle}>
+                  <span style={cardTitleStyle}>{id}</span>
+                  <span style={metaStyle}>{PROVIDER_LABELS[site.provider]}</span>
+                  <div style={actionsStyle}>
+                    {status}
+                    <button style={buttonStyle} disabled={busy} onClick={beginEdit}>{t.edit}</button>
+                  </div>
+                </div>
+                <div style={gridStyle}>
+                  <div style={cellStyle}>
+                    <span style={labelStyle}>{t.apiUrlTitle}</span>
+                    <span style={codeValueStyle} title={site.baseUrl}>{site.baseUrl}</span>
+                  </div>
+                  <div style={cellStyle}>
+                    <span style={labelStyle}>{t.tokenRefTitle}</span>
+                    <span style={codeValueStyle} title={site.tokenRef}>{site.tokenRef}</span>
+                  </div>
+                  <div style={cellStyle}>
+                    <span style={labelStyle}>{t.defaultProjectPlaceholder}</span>
+                    <span
+                      style={{ ...valueStyle, color: site.defaultProject === undefined ? COLOR.tertiary : COLOR.text }}
+                      title={site.defaultProject ?? ''}
+                    >
+                      {site.defaultProject ?? t.emptyValue}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )
+          }
           return (
-            <div key={id} style={rowStyle}>
-              <strong style={{ minWidth: 80 }}>{id}</strong>
-              <span style={{ minWidth: 60 }}>{PROVIDER_LABELS[site.provider]}</span>
-              <span style={fieldStyle} title={t.apiUrlTitle}>{site.baseUrl}</span>
-              <span style={fieldStyle} title={t.tokenRefTitle}>{site.tokenRef}</span>
-              <span style={{ ...fieldStyle, width: 120, color: site.defaultProject === undefined ? '#888' : 'inherit' }}>
-                {site.defaultProject ?? t.defaultProjectFallback}
-              </span>
-              {status}
-              <button style={{ ...buttonStyle, marginLeft: 'auto' }} disabled={busy} onClick={beginEdit}>{t.edit}</button>
+            <div key={id} style={cardStyle}>
+              <div style={cardHeaderStyle}>
+                <span style={cardTitleStyle}>{id}</span>
+                <div style={actionsStyle}>
+                  {status}
+                  <button style={dangerButtonStyle} disabled={busy} onClick={() => void run(async () => {
+                    await adminWrite('DELETE', `/git-credentials-admin/sites/${encodeURIComponent(id)}`)
+                  })}
+                  >
+                    {t.deleteSite}
+                  </button>
+                </div>
+              </div>
+              <div style={gridStyle}>
+                <div style={cellStyle}>
+                  <span style={labelStyle}>{t.providerLabel}</span>
+                  <select
+                    style={fieldStyle}
+                    value={draft.provider}
+                    onChange={event => {
+                      const provider = event.target.value as ProviderId
+                      setDrafts({
+                        ...drafts,
+                        [id]: { ...draft, provider, tokenRef: DEFAULT_TOKEN_REFS[provider] },
+                      })
+                    }}
+                  >
+                    <option value="gitlab">GitLab</option>
+                    <option value="github">GitHub</option>
+                    <option value="gitee">Gitee</option>
+                    <option value="gitea">Gitea</option>
+                    <option value="forgejo">Forgejo</option>
+                    <option value="bitbucket">Bitbucket</option>
+                  </select>
+                </div>
+                <div style={cellStyle}>
+                  <span style={labelStyle}>{t.apiUrlTitle}</span>
+                  <input
+                    style={fieldStyle}
+                    value={draft.baseUrl}
+                    onChange={event => setDrafts({ ...drafts, [id]: { ...draft, baseUrl: event.target.value } })}
+                  />
+                </div>
+                <div style={cellStyle}>
+                  <span style={labelStyle}>{t.tokenRefTitle}</span>
+                  <input
+                    style={fieldStyle}
+                    value={draft.tokenRef}
+                    onChange={event => setDrafts({ ...drafts, [id]: { ...draft, tokenRef: event.target.value } })}
+                  />
+                </div>
+                <div style={cellStyle}>
+                  <span style={labelStyle}>{t.defaultProjectPlaceholder}</span>
+                  <input
+                    style={fieldStyle}
+                    placeholder={t.defaultProjectPlaceholder}
+                    value={draft.defaultProject}
+                    onChange={event => setDrafts({ ...drafts, [id]: { ...draft, defaultProject: event.target.value } })}
+                  />
+                </div>
+                <div style={cellStyle}>
+                  <span style={labelStyle}>{t.tokenValueLabel}</span>
+                  <input
+                    style={fieldStyle}
+                    type="password"
+                    placeholder={t.tokenValuePlaceholder}
+                    value={draft.token}
+                    onChange={event => setDrafts({ ...drafts, [id]: { ...draft, token: event.target.value } })}
+                  />
+                </div>
+              </div>
+              <div style={footerStyle}>
+                <button
+                  style={buttonStyle}
+                  disabled={busy || draft.token.trim() === ''}
+                  onClick={() => void run(async () => {
+                    await adminWrite('POST', '/git-credentials-admin/token', {
+                      ref: draft.tokenRef.trim(),
+                      value: draft.token,
+                    })
+                    setDrafts({ ...drafts, [id]: { ...draft, token: '' } })
+                  })}
+                >
+                  {t.saveToken}
+                </button>
+                {token?.configured === true && (
+                  <button
+                    style={buttonStyle}
+                    disabled={busy}
+                    onClick={() => void run(async () => {
+                      await adminWrite('DELETE', '/git-credentials-admin/token', { ref: site.tokenRef })
+                    })}
+                  >
+                    {t.clearToken}
+                  </button>
+                )}
+                <div style={actionsStyle}>
+                  <button style={buttonStyle} disabled={busy} onClick={cancelEdit}>{t.cancel}</button>
+                  <button
+                    style={primaryButtonStyle}
+                    disabled={busy}
+                    onClick={() => void run(async () => {
+                      await adminWrite('POST', '/git-credentials-admin/sites', {
+                        id,
+                        site: {
+                          provider: draft.provider,
+                          baseUrl: draft.baseUrl.trim(),
+                          tokenRef: draft.tokenRef.trim(),
+                          ...draft.defaultProject.trim() === '' ? {} : { defaultProject: draft.defaultProject.trim() },
+                        },
+                      })
+                      if (draft.token.trim() !== '') {
+                        await adminWrite('POST', '/git-credentials-admin/token', { ref: draft.tokenRef.trim(), value: draft.token })
+                      }
+                      setDrafts({ ...drafts, [id]: { ...draft, token: '' } })
+                      setEditing({ ...editing, [id]: false })
+                    })}
+                  >
+                    {t.save}
+                  </button>
+                </div>
+              </div>
             </div>
           )
-        }
-        return (
-          <div key={id} style={siteBlockStyle}>
-            <div style={fieldsRowStyle}>
-              <strong style={{ minWidth: 80 }}>{id}</strong>
+        })}
+
+        {siteIds.length === 0 && <p style={introStyle}>{t.noSites}</p>}
+
+        <div style={cardStyle}>
+          <div style={cardHeaderStyle}>
+            <span style={cardTitleStyle}>{t.addSiteHeading}</span>
+          </div>
+          <div style={gridStyle}>
+            <div style={cellStyle}>
+              <span style={labelStyle}>{t.siteIdLabel}</span>
+              <input
+                style={fieldStyle}
+                placeholder={t.siteIdPlaceholder}
+                value={newId}
+                onChange={event => setNewId(event.target.value)}
+              />
+            </div>
+            <div style={cellStyle}>
+              <span style={labelStyle}>{t.providerLabel}</span>
               <select
                 style={fieldStyle}
-                value={draft.provider}
+                value={newProvider}
                 onChange={event => {
                   const provider = event.target.value as ProviderId
-                  setDrafts({
-                    ...drafts,
-                    [id]: { ...draft, provider, tokenRef: DEFAULT_TOKEN_REFS[provider] },
-                  })
+                  setNewProvider(provider)
+                  setNewBaseUrl(DEFAULT_BASE_URLS[provider])
+                  setNewTokenRef(DEFAULT_TOKEN_REFS[provider])
                 }}
               >
                 <option value="gitlab">GitLab</option>
@@ -346,194 +659,85 @@ function Loaded(): ReactNode {
                 <option value="forgejo">Forgejo</option>
                 <option value="bitbucket">Bitbucket</option>
               </select>
-              <input
-                style={{ ...fieldStyle, width: 200 }}
-                value={draft.baseUrl}
-                onChange={event => setDrafts({ ...drafts, [id]: { ...draft, baseUrl: event.target.value } })}
-              />
-              <input
-                style={{ ...fieldStyle, width: 150 }}
-                title={t.tokenRefTitle}
-                value={draft.tokenRef}
-                onChange={event => setDrafts({ ...drafts, [id]: { ...draft, tokenRef: event.target.value } })}
-              />
-              <input
-                style={{ ...fieldStyle, width: 120 }}
-                title={t.defaultProjectPlaceholder}
-                placeholder={t.defaultProjectPlaceholder}
-                value={draft.defaultProject}
-                onChange={event => setDrafts({ ...drafts, [id]: { ...draft, defaultProject: event.target.value } })}
-              />
-              {status}
             </div>
-            <div style={actionsRowStyle}>
-              <button
-                style={primaryButtonStyle}
-                disabled={busy}
-                onClick={() => void run(async () => {
-                  await adminWrite('POST', '/git-credentials-admin/sites', {
-                    id,
-                    site: {
-                      provider: draft.provider,
-                      baseUrl: draft.baseUrl.trim(),
-                      tokenRef: draft.tokenRef.trim(),
-                      ...draft.defaultProject.trim() === '' ? {} : { defaultProject: draft.defaultProject.trim() },
-                    },
-                  })
-                  if (draft.token.trim() !== '') {
-                    await adminWrite('POST', '/git-credentials-admin/token', { ref: draft.tokenRef.trim(), value: draft.token })
-                  }
-                  setDrafts({ ...drafts, [id]: { ...draft, token: '' } })
-                  setEditing({ ...editing, [id]: false })
-                })}
-              >
-                {t.save}
-              </button>
-              <button
-                style={buttonStyle}
-                disabled={busy}
-                onClick={cancelEdit}
-              >
-                {t.cancel}
-              </button>
-              <span style={{ width: 1, alignSelf: 'stretch', background: '#8882' }} />
+            <div style={cellStyle}>
+              <span style={labelStyle}>{t.apiUrlTitle}</span>
               <input
-                style={{ ...fieldStyle, width: 200, marginRight: 0 }}
+                style={fieldStyle}
+                placeholder={BASE_URL_PLACEHOLDERS[locale][newProvider]}
+                value={newBaseUrl}
+                onChange={event => setNewBaseUrl(event.target.value)}
+              />
+            </div>
+            <div style={cellStyle}>
+              <span style={labelStyle}>{t.tokenRefTitle}</span>
+              <input
+                style={fieldStyle}
+                placeholder={t.tokenRefPlaceholder}
+                value={newTokenRef}
+                onChange={event => setNewTokenRef(event.target.value)}
+              />
+            </div>
+            <div style={cellStyle}>
+              <span style={labelStyle}>{t.defaultProjectPlaceholder}</span>
+              <input
+                style={fieldStyle}
+                placeholder={t.defaultProjectPlaceholder}
+                value={newDefaultProject}
+                onChange={event => setNewDefaultProject(event.target.value)}
+              />
+            </div>
+            <div style={cellStyle}>
+              <span style={labelStyle}>{t.tokenValueLabel}</span>
+              <input
+                style={fieldStyle}
                 type="password"
                 placeholder={t.tokenValuePlaceholder}
-                value={draft.token}
-                onChange={event => setDrafts({ ...drafts, [id]: { ...draft, token: event.target.value } })}
+                value={newToken}
+                onChange={event => setNewToken(event.target.value)}
               />
+            </div>
+          </div>
+          <div style={footerStyle}>
+            <button
+              style={buttonStyle}
+              disabled={busy || newToken.trim() === ''}
+              onClick={() => void run(async () => {
+                await adminWrite('POST', '/git-credentials-admin/token', { ref: newTokenRef.trim(), value: newToken })
+                setNewToken('')
+              })}
+            >
+              {t.saveToken}
+            </button>
+            <div style={actionsStyle}>
               <button
-                style={buttonStyle}
-                disabled={busy || draft.token.trim() === ''}
+                style={primaryButtonStyle}
+                disabled={busy || newId.trim() === '' || newBaseUrl.trim() === ''}
                 onClick={() => void run(async () => {
-                  await adminWrite('POST', '/git-credentials-admin/token', {
-                    ref: draft.tokenRef.trim(),
-                    value: draft.token,
+                  await adminWrite('POST', '/git-credentials-admin/sites', {
+                    id: newId.trim(),
+                    site: {
+                      provider: newProvider,
+                      baseUrl: newBaseUrl.trim(),
+                      tokenRef: newTokenRef.trim(),
+                      ...newDefaultProject.trim() === '' ? {} : { defaultProject: newDefaultProject.trim() },
+                    },
                   })
-                  setDrafts({ ...drafts, [id]: { ...draft, token: '' } })
+                  if (newToken.trim() !== '') {
+                    await adminWrite('POST', '/git-credentials-admin/token', { ref: newTokenRef.trim(), value: newToken })
+                  }
+                  setNewId('')
+                  setNewProvider('gitlab')
+                  setNewBaseUrl('')
+                  setNewTokenRef('GITLAB_TOKEN')
+                  setNewToken('')
+                  setNewDefaultProject('')
                 })}
               >
-                {t.saveToken}
-              </button>
-              {token?.configured === true && (
-                <button
-                  style={buttonStyle}
-                  disabled={busy}
-                  onClick={() => void run(async () => {
-                    await adminWrite('DELETE', '/git-credentials-admin/token', { ref: site.tokenRef })
-                  })}
-                >
-                  {t.clearToken}
-                </button>
-              )}
-              <button
-                style={dangerButtonStyle}
-                disabled={busy}
-                onClick={() => void run(async () => {
-                  await adminWrite('DELETE', `/git-credentials-admin/sites/${encodeURIComponent(id)}`)
-                })}
-              >
-                {t.deleteSite}
+                {t.addSite}
               </button>
             </div>
           </div>
-        )
-      })}
-
-      {siteIds.length === 0 && (
-        <p style={{ color: '#888' }}>{t.noSites}</p>
-      )}
-
-      <div style={{ borderTop: '1px solid #8884', marginTop: 8, paddingTop: 8 }}>
-        <div style={fieldsRowStyle}>
-          <input
-            style={{ ...fieldStyle, width: 100 }}
-            placeholder={t.siteIdPlaceholder}
-            value={newId}
-            onChange={event => setNewId(event.target.value)}
-          />
-          <select
-            style={fieldStyle}
-            value={newProvider}
-            onChange={event => {
-              const provider = event.target.value as ProviderId
-              setNewProvider(provider)
-              setNewBaseUrl(DEFAULT_BASE_URLS[provider])
-              setNewTokenRef(DEFAULT_TOKEN_REFS[provider])
-            }}
-          >
-            <option value="gitlab">GitLab</option>
-            <option value="github">GitHub</option>
-            <option value="gitee">Gitee</option>
-            <option value="gitea">Gitea</option>
-            <option value="forgejo">Forgejo</option>
-            <option value="bitbucket">Bitbucket</option>
-          </select>
-          <input
-            style={{ ...fieldStyle, width: 200 }}
-            placeholder={BASE_URL_PLACEHOLDERS[locale][newProvider]}
-            value={newBaseUrl}
-            onChange={event => setNewBaseUrl(event.target.value)}
-          />
-          <input
-            style={{ ...fieldStyle, width: 150 }}
-            placeholder={t.tokenRefPlaceholder}
-            value={newTokenRef}
-            onChange={event => setNewTokenRef(event.target.value)}
-          />
-          <input
-            style={{ ...fieldStyle, width: 120 }}
-            placeholder={t.defaultProjectPlaceholder}
-            value={newDefaultProject}
-            onChange={event => setNewDefaultProject(event.target.value)}
-          />
-        </div>
-        <div style={actionsRowStyle}>
-          <input
-            style={{ ...fieldStyle, width: 200 }}
-            type="password"
-            placeholder={t.tokenValuePlaceholder}
-            value={newToken}
-            onChange={event => setNewToken(event.target.value)}
-          />
-          <button
-            style={buttonStyle}
-            disabled={busy || newToken.trim() === ''}
-            onClick={() => void run(async () => {
-              await adminWrite('POST', '/git-credentials-admin/token', { ref: newTokenRef.trim(), value: newToken })
-              setNewToken('')
-            })}
-          >
-            {t.saveToken}
-          </button>
-          <button
-            style={{ ...primaryButtonStyle, marginLeft: 'auto' }}
-            disabled={busy || newId.trim() === '' || newBaseUrl.trim() === ''}
-            onClick={() => void run(async () => {
-              await adminWrite('POST', '/git-credentials-admin/sites', {
-                id: newId.trim(),
-                site: {
-                  provider: newProvider,
-                  baseUrl: newBaseUrl.trim(),
-                  tokenRef: newTokenRef.trim(),
-                  ...newDefaultProject.trim() === '' ? {} : { defaultProject: newDefaultProject.trim() },
-                },
-              })
-              if (newToken.trim() !== '') {
-                await adminWrite('POST', '/git-credentials-admin/token', { ref: newTokenRef.trim(), value: newToken })
-              }
-              setNewId('')
-              setNewProvider('gitlab')
-              setNewBaseUrl('')
-              setNewTokenRef('GITLAB_TOKEN')
-              setNewToken('')
-              setNewDefaultProject('')
-            })}
-          >
-            {t.addSite}
-          </button>
         </div>
       </div>
     </div>
