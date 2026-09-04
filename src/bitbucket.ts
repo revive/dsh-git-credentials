@@ -393,6 +393,33 @@ export class BitbucketClient {
   }
 
   /**
+   * Bitbucket Cloud's Issue Tracker has no labels concept: its issue
+   * resource has always exposed only kind/priority/milestone/component/
+   * version, with no labels field or endpoint in the REST API (the API
+   * reference page did not fully load during review — this is based on
+   * Bitbucket's public docs and its long-documented issue field set, not a
+   * freshly re-fetched spec, so double-check if Atlassian has changed this).
+   * This fails loud rather than silently no-op'ing, so a caller relying on
+   * label triage across providers finds out immediately that Bitbucket
+   * needs a different mechanism (e.g. `component` or a milestone).
+   * @param options - project, issue id, requested label names (any).
+   * @returns never — always throws.
+   */
+  async labelIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly add?: readonly string[]
+    readonly remove?: readonly string[]
+    readonly signal?: AbortSignal
+  }): Promise<BitbucketEntry> {
+    void options
+    throw new Error(
+      `site "${this.site.id}": Bitbucket Cloud's Issue Tracker API has no labels field or endpoint `
+      + '(fields are limited to kind/priority/milestone/component/version); use "component" or a milestone instead.',
+    )
+  }
+
+  /**
    * Merge a pull request (write operation).
    * @param options - project (site default when omitted), PR id, cancellation.
    * @returns the merged pull-request summary.
@@ -427,7 +454,7 @@ export class BitbucketClient {
   /** One authenticated POST against the Bitbucket 2.0 API. */
   private async post<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     let response: Response
     try {
       response = await fetch(url, {
@@ -469,7 +496,7 @@ export class BitbucketClient {
     readonly signal?: AbortSignal
   }): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     for (const [key, value] of Object.entries(options.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, value)
     }

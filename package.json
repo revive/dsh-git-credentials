@@ -28,6 +28,7 @@
   "scripts": {
     "gen:tsconfig": "node tools/gen-tsconfig.mjs",
     "typecheck": "tsc -p tsconfig.json",
+    "test": "tsx --test test/**/*.test.ts",
     "build": "tsdown",
     "smoke": "node --import \"$DSH_REPO/node_modules/tsx/dist/esm/index.mjs\" smoke.ts",
     "pack": "pnpm pack"
@@ -59,6 +60,7 @@
   },
   "devDependencies": {
     "tsdown": "^0.22.2",
+    "tsx": "^4.23.13",
     "react": "^18.3.1",
     "@types/react": "^18.3.12"
   },

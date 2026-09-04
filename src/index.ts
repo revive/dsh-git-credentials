@@ -26,7 +26,7 @@ import { GitHubClient, type GitHubFile } from './github.ts'
 import { GiteeClient } from './gitee.ts'
 import { GiteaClient } from './gitea.ts'
 import { BitbucketClient } from './bitbucket.ts'
-import { GitStore, refOf, type ForgeProvider } from './store.ts'
+import { GitStore, refOf, adapterFor, type ForgeProvider } from './store.ts'
 import { registerGitLabAdmin } from './admin.ts'
 
 export const name = 'git-credentials'
@@ -153,10 +153,12 @@ export function apply(ctx: Context, config: PluginConfig): void {
   const clientFor = (siteArg: string | undefined, tool: string, provider: ForgeProvider):
     GitLabClient | GitHubClient | GiteeClient | GiteaClient | BitbucketClient => {
     const state = store.read()
-    const candidates = Object.entries(state.sites).filter(([, site]) => site.provider === provider)
+    // Forgejo sites are wire-compatible with Gitea and share its tool family
+    // (registered under provider "gitea"), so match on the effective adapter.
+    const candidates = Object.entries(state.sites).filter(([, site]) => adapterFor(site.provider) === provider)
     const defaultSiteId = state.defaultSite
     const fallback = defaultSiteId !== undefined
-      ? (state.sites[defaultSiteId]?.provider === provider ? defaultSiteId : undefined)
+      ? (state.sites[defaultSiteId] !== undefined && adapterFor(state.sites[defaultSiteId]!.provider) === provider ? defaultSiteId : undefined)
       : undefined
     const id = siteArg ?? (candidates.length === 1 ? candidates[0]![0] : undefined) ?? fallback
     if (id === undefined) {
@@ -166,7 +168,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
       throw new Error(`git-credentials: ${hint}`)
     }
     const site = state.sites[id]
-    if (site === undefined || site.provider !== provider) {
+    if (site === undefined || adapterFor(site.provider) !== provider) {
       const ids = candidates.map(([candidateId]) => candidateId).join(', ') || '(none)'
       throw new Error(`git-credentials: unknown ${provider} site "${id}" for ${tool}; configured ${provider} sites: ${ids}`)
     }
@@ -176,7 +178,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
       tokenRef: refOf(site.tokenRef),
       ...site.defaultProject === undefined ? {} : { defaultProject: site.defaultProject },
     }
-    switch (site.provider) {
+    switch (adapterFor(site.provider)) {
       case 'gitlab': return new GitLabClient(state.tokens, base)
       case 'github': return new GitHubClient(state.tokens, base)
       case 'gitee': return new GiteeClient(state.tokens, base)
@@ -210,6 +212,14 @@ export function apply(ctx: Context, config: PluginConfig): void {
   /** The entry id for display (iid on GitLab, number elsewhere). */
   const entryId = (entry: IterationEntry): number => entry.number ?? entry.iid ?? 0
 
+  /** Read an optional array-of-strings argument, dropping non-string/blank entries. */
+  const stringArray = (args: Record<string, unknown>, key: string): string[] | undefined => {
+    const value = args[key]
+    if (!Array.isArray(value)) return undefined
+    const filtered = value.filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    return filtered.length === 0 ? undefined : filtered
+  }
+
   /** Render one issues/pulls action result. */
   const renderEntryAction = (label: string, plural: string) =>
     (args: { action?: string }, entries: IterationEntry[]): Array<{ type: 'text'; text: string }> => {
@@ -224,6 +234,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
         case 'close': return [{ type: 'text', text: `Closed ${label} #${entryId(entry)} — ${entry.webUrl}` }]
         case 'reopen': return [{ type: 'text', text: `Reopened ${label} #${entryId(entry)} — ${entry.webUrl}` }]
         case 'comment': return [{ type: 'text', text: `Commented on ${label} #${entryId(entry)}: ${entry.title} — ${entry.webUrl}` }]
+        case 'label': return [{ type: 'text', text: `Updated labels on ${label} #${entryId(entry)}: ${entry.title} — ${entry.webUrl}` }]
         case 'merge': return [{ type: 'text', text: `Merged ${label} #${entryId(entry)}: ${entry.title} — ${entry.webUrl}` }]
         default: return [{
           type: 'text',
@@ -317,6 +328,13 @@ export function apply(ctx: Context, config: PluginConfig): void {
     closeIssue(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
     reopenIssue(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
     commentIssue(options: { readonly project?: string; readonly number: number; readonly body: string; readonly signal?: AbortSignal }): Promise<IterationEntry>
+    labelIssue(options: {
+      readonly project?: string
+      readonly number: number
+      readonly add?: readonly string[]
+      readonly remove?: readonly string[]
+      readonly signal?: AbortSignal
+    }): Promise<IterationEntry>
     mergePull(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
     closePull(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
     listReleases(options: {
@@ -369,14 +387,18 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
     ctx.tools.register(defineTool({
       name: named(reposKind),
-      description: `List/search or create ${label} ${reposKind}. action "list" lists or searches (search?, perPage?${spec.gitlabExtras === true ? ', membership?' : ''}); action "create" creates one (name, description?${spec.gitlabExtras === true ? ', path?, visibility?' : ', private?'}) — the token is injected per site.${SITE_DESCRIPTION}`,
+      description: `List/search or create ${label} ${reposKind}. action "list" lists or searches (search?, perPage?${spec.gitlabExtras === true ? ', membership?' : ''}); action "create" creates one (name, description?${spec.gitlabExtras === true ? ', path?, visibility?' : ', private?'}) — the token is injected per site. Only use "search" to find a repository when you do NOT already know both the owner and the repo name. If you already have "${projectHint}", skip this tool entirely and pass it as "project" directly to the issues, pull-request, file, or release tools instead — those work straight from "owner/repo" with no lookup step, and this search action requires broader repository-read scope that a least-privilege (e.g. issue-only) token may not have.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
         action: {
           type: 'string', enum: ['list', 'create'],
           description: 'What to do; defaults to "list".',
         },
-        search: { type: 'string', description: 'Filter repositories whose name or path contains this text.' },
+        search: {
+          type: 'string',
+          description: 'Filter repositories whose name or path contains this text. Only needed when the repository is not already known as '
+            + `"${projectHint}" — do not call this just to confirm a repo you can already name; pass it straight to another tool's "project" argument instead.`,
+        },
         ...spec.gitlabExtras === true
           ? { membership: { type: 'boolean', description: 'Only list projects the token owner belongs to.' } }
           : {},
@@ -468,25 +490,33 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
     ctx.tools.register(defineTool({
       name: named('issues'),
-      description: `List, create, or modify ${label} issues. action: "list" (project?, state?, perPage?), "create" (title, body?), "close" (number), "reopen" (number), "comment" (number, body) — the token is injected per site.${SITE_DESCRIPTION}`,
+      description: `List, create, or modify ${label} issues. action: "list" (project?, state?, perPage?), "create" (title, body?), "close" (number), "reopen" (number), "comment" (number, body), "label" (number, addLabels? and/or removeLabels?) — the token is injected per site. Pass "project" directly as "${projectHint}" when known; this tool calls the issues API straight from that, with no repository search or lookup step, so it needs no broader repository-read scope beyond issues.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
         action: {
-          type: 'string', enum: ['list', 'create', 'close', 'reopen', 'comment'],
+          type: 'string', enum: ['list', 'create', 'close', 'reopen', 'comment', 'label'],
           description: 'What to do; defaults to "list".',
         },
         project: {
           type: 'string',
-          description: `Repository on ${label}, e.g. ${projectHint}; defaults to the site defaultProject when configured.`,
+          description: `Repository on ${label}, e.g. ${projectHint}; defaults to the site defaultProject when configured. Pass it directly — no need to look the repository up with the ${reposKind} tool's "search" action first.`,
         },
         state: {
           type: 'string',
           description: `Filter by state (${spec.defaultState === 'opened' ? 'opened/closed/all' : 'open/closed/all'}); only for action "list".`,
         },
         perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
-        number: { type: 'integer', description: 'Issue number (required for close/reopen/comment).' },
+        number: { type: 'integer', description: 'Issue number (required for close/reopen/comment/label).' },
         title: { type: 'string', description: 'Issue title (required for create).' },
         body: { type: 'string', description: 'Issue body or comment text (Markdown).' },
+        addLabels: {
+          type: 'array', items: { type: 'string' },
+          description: 'Label names to add to the issue; only for action "label". At least one of addLabels/removeLabels is required for "label".',
+        },
+        removeLabels: {
+          type: 'array', items: { type: 'string' },
+          description: 'Label names to remove from the issue; only for action "label". At least one of addLabels/removeLabels is required for "label".',
+        },
       },
       output: {
         schema: { type: 'array', items: spec.entrySchema },
@@ -522,8 +552,22 @@ export function apply(ctx: Context, config: PluginConfig): void {
               body: needString(args, 'body', named('issues')),
               signal: exec.signal,
             })]
+          case 'label': {
+            const add = stringArray(args, 'addLabels')
+            const remove = stringArray(args, 'removeLabels')
+            if (add === undefined && remove === undefined) {
+              throw new Error(`${named('issues')}: action "label" requires at least one of "addLabels" or "removeLabels"`)
+            }
+            return [await c.labelIssue({
+              ...(args.project === undefined ? {} : { project: args.project }),
+              number: needNumber(args, named('issues')),
+              ...(add === undefined ? {} : { add }),
+              ...(remove === undefined ? {} : { remove }),
+              signal: exec.signal,
+            })]
+          }
           default:
-            throw new Error(`${named('issues')}: unknown action ${JSON.stringify(args.action)}; valid: list, create, close, reopen, comment`)
+            throw new Error(`${named('issues')}: unknown action ${JSON.stringify(args.action)}; valid: list, create, close, reopen, comment, label`)
         }
       },
     }))

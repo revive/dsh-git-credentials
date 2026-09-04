@@ -327,6 +327,31 @@ export class GitHubClient {
   }
 
   /**
+   * Add and/or remove labels on an issue (write operation). GitHub's label
+   * endpoints work by label name directly — no id lookup needed. Scope: the
+   * fine-grained "Issues" repository permission (read and write) covers
+   * this; classic tokens need "repo" (public repos: "public_repo").
+   * @param options - project, issue number, label names to add/remove, cancellation.
+   * @returns the updated issue summary.
+   */
+  async labelIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly add?: readonly string[]
+    readonly remove?: readonly string[]
+    readonly signal?: AbortSignal
+  }): Promise<GitHubEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    if (options.add !== undefined && options.add.length > 0) {
+      await this.post(`/repos/${owner}/${repo}/issues/${options.number}/labels`, { labels: options.add }, options.signal)
+    }
+    for (const name of options.remove ?? []) {
+      await this.del(`/repos/${owner}/${repo}/issues/${options.number}/labels/${encodeURIComponent(name)}`, options.signal)
+    }
+    return this.issueEntry(owner, repo, options.number, options.signal)
+  }
+
+  /**
    * Merge a pull request (write operation).
    * @param options - project, PR number, cancellation.
    * @returns the merged pull-request summary.
@@ -447,7 +472,7 @@ export class GitHubClient {
   /** One authenticated DELETE against the GitHub REST API. */
   private async del(path: string, signal?: AbortSignal): Promise<void> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     let response: Response
     try {
       response = await fetch(url, {
@@ -484,7 +509,7 @@ export class GitHubClient {
   /** One authenticated JSON write (PATCH/PUT) against the GitHub REST API. */
   private async write<T>(method: 'PATCH' | 'PUT', path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     let response: Response
     try {
       response = await fetch(url, {
@@ -514,7 +539,7 @@ export class GitHubClient {
   /** One authenticated POST against the GitHub REST API. */
   private async post<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     let response: Response
     try {
       response = await fetch(url, {
@@ -556,7 +581,7 @@ export class GitHubClient {
     readonly signal?: AbortSignal
   }): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     for (const [key, value] of Object.entries(options.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, value)
     }

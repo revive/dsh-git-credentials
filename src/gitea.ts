@@ -319,6 +319,63 @@ export class GiteaClient {
   }
 
   /**
+   * Add and/or remove labels on an issue (write operation). Unlike GitHub,
+   * Gitea's issue-label endpoints take numeric label ids, not names, so
+   * this resolves each requested name against the repository's label list
+   * first (first 50 labels only — repositories with more would need paging,
+   * not implemented here). Scope: NOT independently verified against a live
+   * instance or the Gitea/Forgejo OpenAPI spec (the docs page for this
+   * endpoint 404'd during review) — best-effort reading of the fine-grained
+   * scope model is that "write:issue" covers issue-label read/write since
+   * labels are exposed only through the issue and repo-label endpoints, not
+   * a separate scope category, but this should be confirmed against a real
+   * instance before relying on it for least-privilege token provisioning.
+   * @param options - project, issue number, label names to add/remove, cancellation.
+   * @returns the updated issue summary.
+   */
+  async labelIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly add?: readonly string[]
+    readonly remove?: readonly string[]
+    readonly signal?: AbortSignal
+  }): Promise<GiteaEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    if (options.add !== undefined && options.add.length > 0) {
+      const ids = await this.resolveLabelIds(owner, repo, options.add, options.signal)
+      await this.post(`/repos/${owner}/${repo}/issues/${options.number}/labels`, { labels: ids }, options.signal)
+    }
+    if (options.remove !== undefined && options.remove.length > 0) {
+      const ids = await this.resolveLabelIds(owner, repo, options.remove, options.signal)
+      for (const id of ids) {
+        await this.del(`/repos/${owner}/${repo}/issues/${options.number}/labels/${id}`, options.signal)
+      }
+    }
+    const raw = await this.get<RawEntry>(
+      `/repos/${owner}/${repo}/issues/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapEntry(raw)
+  }
+
+  /** Resolve label names to the repository's numeric label ids (Gitea's issue-label endpoints take ids, not names). */
+  private async resolveLabelIds(owner: string, repo: string, names: readonly string[], signal?: AbortSignal): Promise<number[]> {
+    const labels = await this.get<Array<{ readonly id: number; readonly name: string }>>(
+      `/repos/${owner}/${repo}/labels`,
+      { params: { limit: '50' }, ...signal === undefined ? {} : { signal } },
+    )
+    const byName = new Map(labels.map(label => [label.name, label.id]))
+    return names.map(name => {
+      const id = byName.get(name)
+      if (id === undefined) {
+        const available = labels.map(label => label.name).join(', ') || '(none)'
+        throw new Error(`site "${this.site.id}": no label named ${JSON.stringify(name)} on ${owner}/${repo}; available: ${available}`)
+      }
+      return id
+    })
+  }
+
+  /**
    * Merge a pull request (write operation).
    * @param options - project (site default when omitted), PR number, cancellation.
    * @returns the merged pull-request summary.
@@ -433,7 +490,7 @@ export class GiteaClient {
   /** One authenticated DELETE against the Gitea API. */
   private async del(path: string, signal?: AbortSignal): Promise<void> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     let response: Response
     try {
       response = await fetch(url, {
@@ -456,7 +513,7 @@ export class GiteaClient {
   /** One authenticated PATCH against the Gitea API. */
   private async patch<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     let response: Response
     try {
       response = await fetch(url, {
@@ -486,7 +543,7 @@ export class GiteaClient {
   /** One authenticated POST against the Gitea API. */
   private async post<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     let response: Response
     try {
       response = await fetch(url, {
@@ -528,7 +585,7 @@ export class GiteaClient {
     readonly signal?: AbortSignal
   }): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     for (const [key, value] of Object.entries(options.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, value)
     }

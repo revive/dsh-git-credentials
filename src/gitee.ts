@@ -324,6 +324,39 @@ export class GiteeClient {
   }
 
   /**
+   * Add and/or remove labels on an issue (write operation). Gitee's label
+   * endpoints work by name, like GitHub's, not by numeric id. The add body
+   * shape (comma-separated `labels` string, matching Gitee's create-issue
+   * `labels` field convention) was not independently verified against a
+   * live instance or a fetched API reference this session — the delete
+   * endpoint's name-based path was confirmed, the add shape was inferred
+   * from Gitee's documented convention elsewhere; test against a real
+   * instance before relying on it.
+   * @param options - project, issue number, label names to add/remove, cancellation.
+   * @returns the updated issue summary.
+   */
+  async labelIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly add?: readonly string[]
+    readonly remove?: readonly string[]
+    readonly signal?: AbortSignal
+  }): Promise<GiteeEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    if (options.add !== undefined && options.add.length > 0) {
+      await this.post(`/repos/${owner}/${repo}/issues/${options.number}/labels`, { labels: options.add.join(',') }, options.signal)
+    }
+    for (const name of options.remove ?? []) {
+      await this.del(`/repos/${owner}/${repo}/issues/${options.number}/labels/${encodeURIComponent(name)}`, options.signal)
+    }
+    const raw = await this.get<RawEntry>(
+      `/repos/${owner}/${repo}/issues/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapEntry(raw)
+  }
+
+  /**
    * Merge a pull request (write operation).
    * @param options - project (site default when omitted), PR number, cancellation.
    * @returns the merged pull-request summary.
@@ -440,7 +473,7 @@ export class GiteeClient {
   /** One authenticated DELETE against the Gitee API. */
   private async del(path: string, signal?: AbortSignal, queryAuth = false): Promise<void> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     if (queryAuth) url.searchParams.set('access_token', token)
     let response: Response
     try {
@@ -483,7 +516,7 @@ export class GiteeClient {
     queryAuth = false,
   ): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     if (queryAuth) url.searchParams.set('access_token', token)
     let response: Response
     try {
@@ -524,7 +557,7 @@ export class GiteeClient {
     queryAuth = false,
   ): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     if (queryAuth) url.searchParams.set('access_token', token)
     let response: Response
     try {
@@ -572,7 +605,7 @@ export class GiteeClient {
     readonly signal?: AbortSignal
   }, queryAuth = false): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + path)
     for (const [key, value] of Object.entries(options.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, value)
     }
