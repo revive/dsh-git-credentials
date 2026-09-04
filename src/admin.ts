@@ -79,7 +79,7 @@ interface ParsedSite {
 }
 
 /** Validate a site write body; returns the normalized write or the problem text. */
-function parseSite(body: unknown): ParsedSite | string {
+export function parseSite(body: unknown): ParsedSite | string {
   if (typeof body !== 'object' || body === null) return 'request body must be a JSON object'
   const record = body as Record<string, unknown>
   const id = typeof record.id === 'string' ? record.id.trim() : ''
@@ -101,11 +101,22 @@ function parseSite(body: unknown): ParsedSite | string {
   const providerRaw = fields.provider
   let provider: ForgeProvider
   if (providerRaw === undefined) provider = 'gitlab'
-  else if (providerRaw === 'gitlab' || providerRaw === 'github') provider = providerRaw
-  else return `site.provider must be "gitlab" or "github", got ${JSON.stringify(providerRaw)}`
+  else if (
+    providerRaw === 'gitlab' || providerRaw === 'github' || providerRaw === 'gitea' ||
+    providerRaw === 'gitee' || providerRaw === 'bitbucket' || providerRaw === 'forgejo'
+  ) provider = providerRaw
+  else return `site.provider must be "gitlab", "github", "gitea", "gitee", "bitbucket", or "forgejo", got ${JSON.stringify(providerRaw)}`
+  const defaultTokenRef: Record<ForgeProvider, string> = {
+    gitlab: 'GITLAB_TOKEN',
+    github: 'GITHUB_TOKEN',
+    gitea: 'GITEA_TOKEN',
+    gitee: 'GITEE_TOKEN',
+    bitbucket: 'BITBUCKET_TOKEN',
+    forgejo: 'FORGEJO_TOKEN',
+  }
   const tokenRef = typeof fields.tokenRef === 'string' && fields.tokenRef.trim() !== ''
     ? fields.tokenRef.trim()
-    : provider === 'github' ? 'GITHUB_TOKEN' : 'GITLAB_TOKEN'
+    : defaultTokenRef[provider]
   try {
     refOf(tokenRef)
   } catch (error) {

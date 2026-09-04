@@ -32,7 +32,20 @@ export function refOf(value: string): TokenRef {
 }
 
 /** Supported forge providers. */
-export type ForgeProvider = 'gitlab' | 'github' | 'gitee' | 'gitea' | 'bitbucket'
+export type ForgeProvider = 'gitlab' | 'github' | 'gitee' | 'gitea' | 'bitbucket' | 'forgejo'
+
+/**
+ * The adapter each provider actually speaks. Forgejo is a hard fork of
+ * Gitea and wire-compatible with it, so it gets its own dropdown identity
+ * (users self-hosting Forgejo don't recognize "Gitea") while reusing the
+ * GiteaClient adapter — no separate client needed.
+ */
+export type AdapterProvider = Exclude<ForgeProvider, 'forgejo'>
+
+/** Map a site's declared provider to the adapter that actually serves it. */
+export function adapterFor(provider: ForgeProvider): AdapterProvider {
+  return provider === 'forgejo' ? 'gitea' : provider
+}
 
 /** One configured site. */
 export interface SiteConfig {

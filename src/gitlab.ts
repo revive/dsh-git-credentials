@@ -328,6 +328,38 @@ export class GitLabClient {
   }
 
   /**
+   * Add and/or remove labels on an issue (write operation). GitLab's Edit
+   * Issue endpoint takes `add_labels`/`remove_labels` as comma-separated
+   * label names directly on the same PUT used for close/reopen — no
+   * separate labels endpoint or id lookup needed. Scope: the Edit Issue
+   * endpoint requires the "api" scope on a personal access token (GitLab
+   * has no narrower issues-only scope for personal access tokens as of
+   * this writing — its fine-grained token model is project/group-scoped,
+   * not permission-scoped the way GitHub's fine-grained PATs are).
+   * @param options - project, issue iid, label names to add/remove, cancellation.
+   * @returns the updated issue summary.
+   */
+  async labelIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly add?: readonly string[]
+    readonly remove?: readonly string[]
+    readonly signal?: AbortSignal
+  }): Promise<GitLabListEntry> {
+    const project = encodeURIComponent(this.resolveProject(options.project))
+    const body: Record<string, unknown> = {
+      ...options.add !== undefined && options.add.length > 0 ? { add_labels: options.add.join(',') } : {},
+      ...options.remove !== undefined && options.remove.length > 0 ? { remove_labels: options.remove.join(',') } : {},
+    }
+    await this.put(`/projects/${project}/issues/${options.number}`, body)
+    const raw = await this.get<RawListEntry>(
+      `/projects/${project}/issues/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapEntry(raw)
+  }
+
+  /**
    * Merge a merge request (write operation).
    * @param options - project (site default when omitted), MR iid, cancellation.
    * @returns the merged merge-request summary.
@@ -441,7 +473,7 @@ export class GitLabClient {
   /** One authenticated DELETE against the GitLab REST API. */
   private async del(path: string, signal?: AbortSignal): Promise<void> {
     const token = this.token()
-    const url = new URL(`/api/v4${path}`, this.site.baseUrl)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + `/api/v4${path}`)
     let response: Response
     try {
       response = await fetch(url, {
@@ -464,7 +496,7 @@ export class GitLabClient {
   /** One authenticated PUT against the GitLab REST API. */
   private async put<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const token = this.token()
-    const url = new URL(`/api/v4${path}`, this.site.baseUrl)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + `/api/v4${path}`)
     let response: Response
     try {
       response = await fetch(url, {
@@ -489,7 +521,7 @@ export class GitLabClient {
   /** One authenticated POST against the GitLab REST API. */
   private async post<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const token = this.token()
-    const url = new URL(`/api/v4${path}`, this.site.baseUrl)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + `/api/v4${path}`)
     let response: Response
     try {
       response = await fetch(url, {
@@ -517,7 +549,7 @@ export class GitLabClient {
     readonly signal?: AbortSignal
   }): Promise<T> {
     const token = this.token()
-    const url = new URL(`/api/v4${path}`, this.site.baseUrl)
+    const url = new URL(this.site.baseUrl.replace(/\/+$/, '') + `/api/v4${path}`)
     for (const [key, value] of Object.entries(options.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, value)
     }
