@@ -56,7 +56,7 @@ Losing the key file means the data is unrecoverable (decryption fails loud and r
 Download `dsh-git-credentials-<version>.tgz` from the [releases page](https://github.com/revive/dsh-git-credentials/releases) — the tarball ships the built browser bundle, so no harness checkout or build step is needed — then install it into a profile with the `dsh` CLI:
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.3.1.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.3.2.tgz
 ```
 
 The first use initializes the profile, pnpm links the package, and `dsh` appends the plugin to the profile's bundle layers. Verify the layer without booting:
@@ -151,6 +151,8 @@ One resource tool per provider, with an `action` parameter selecting the operati
 ## Development
 
 Prerequisites: a clone of [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness). The dev toolchain is harness-backed: point `DSH_REPO` at the checkout and put its `node_modules/.bin` on `PATH` (the harness's `@deepseek-ai/*` packages are private and resolve through its tsconfig paths).
+
+The browser half targets the current client slot standard (harness 0.1.5-alpha.1 and later): the panel is a `settings.section` list entry whose component receives the composed section props, and the typecheck program pulls the slot contracts through type-only imports. Typecheck against the checkout you actually run — regenerate `tsconfig.json` after switching harness versions.
 
 ```sh
 export DSH_REPO=/path/to/deepseek-harness

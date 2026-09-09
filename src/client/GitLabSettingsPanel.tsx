@@ -1,20 +1,28 @@
 /**
- * The Settings → GitLab management panel: add, edit, and delete sites (base
- * URL + token reference) and store or clear each site's token value. All
- * writes go to the plugin's own `/gitlab-admin/*` routes, which the host
- * half registers on the GUI webserver; token values never appear in any
- * response — the panel only ever shows configured state.
- * @module dsh-gitlab-plugin/client
+ * The Settings → Git 凭据 management panel: add, edit, and delete sites
+ * (base URL + token reference) for every supported forge provider, and store
+ * or clear each site's token value. All writes go to the plugin's own
+ * `/git-credentials-admin/*` routes, which the host half registers on the GUI
+ * webserver; token values never appear in any response — the panel only ever
+ * shows configured state.
+ *
+ * The panel is a `settings.section` list entry of the current slot standard:
+ * it receives the composed section props (owner `close` plus the standard
+ * kit) and injects nothing. A failed admin read renders its error with a
+ * retry affordance instead of a permanently blank content column.
+ * @module dsh-git-credentials/client
  */
 
 import { useCallback, useEffect, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
+import type { ComposedProps, EntryKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
+// Type-only: pulls the settings SlotMap merge (the 'settings.section' entry).
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 
-/** The panel receives no injected values; it talks to the admin routes directly. */
-export interface GitLabSettingsPanelInjected {
-  /** Marker: no wire face is injected; the panel uses same-origin fetch. */
-  children?: never
-}
+/** The composed props of one settings.section entry (the panel consumes none of them). */
+export type GitLabSettingsPanelProps = ComposedProps<
+  'settings.section', EntryKeyOf<'settings.section'>, never, undefined, object
+>
 
 /** One supported forge provider. */
 type ProviderId = 'gitlab' | 'github' | 'gitee' | 'gitea' | 'bitbucket'
@@ -145,14 +153,12 @@ async function adminWrite(method: 'POST' | 'DELETE', path: string, body?: unknow
 }
 
 /**
- * The GitLab settings section. Slot-delivered injected props arrive spread
- * flat; the shell injects asynchronously, so render nothing until the inject
- * face lands.
- * @param props - the slot-delivered inject face (marker only).
- * @returns the panel, or null while the shell has not injected yet.
+ * The Git 凭据 settings section. The composed section props are unused — the
+ * panel talks to the admin routes directly.
+ * @param _props - the composed settings.section props (unused).
+ * @returns the panel.
  */
-export function GitLabSettingsPanel(props: GitLabSettingsPanelInjected): ReactNode {
-  if (props === undefined) return null
+export function GitLabSettingsPanel(_props: GitLabSettingsPanelProps): ReactNode {
   return <Loaded />
 }
 
@@ -178,7 +184,7 @@ function Loaded(): ReactNode {
       setState(await adminGet('/git-credentials-admin/state') as AdminState)
     } catch (caught) {
       setState(null)
-      setError(`GitLab 插件未加载：${caught instanceof Error ? caught.message : String(caught)}`)
+      setError(`Git 凭据管理暂不可用：${caught instanceof Error ? caught.message : String(caught)}`)
     }
   }, [])
 
@@ -197,15 +203,28 @@ function Loaded(): ReactNode {
     }
   }, [load])
 
-  if (state === null) return null
+  // While the first read is in flight show a loading line; once a read has
+  // failed, show the error WITH a retry instead of a blank content column —
+  // a silent blank here is indistinguishable from a broken registration.
+  if (state === null) {
+    if (error === null) return <p style={{ maxWidth: 760, color: '#888', fontSize: 14 }}>加载中…</p>
+    return (
+      <div style={{ maxWidth: 760, fontSize: 14, lineHeight: 1.6 }}>
+        <p style={{ color: '#e5484d' }}>{error}</p>
+        <div style={rowStyle}>
+          <button style={buttonStyle} onClick={() => void load()} disabled={busy}>重试</button>
+        </div>
+      </div>
+    )
+  }
 
   const siteIds = Object.keys(state.sites)
   return (
     <div style={{ maxWidth: 760, fontSize: 14, lineHeight: 1.6 }}>
       <p style={{ color: '#888' }}>
-        在这里管理 Git 凭据（GitLab / GitHub）：站点地址与 token 保存在插件
-        自己的加密文件（AES-256-GCM，密钥独立文件，0600）中，token 值不会
-        进入模型上下文。修改即时生效，无需重启。
+        在这里管理 Git 凭据（GitLab / GitHub / Gitee / Gitea / Bitbucket）：
+        站点地址与 token 保存在插件自己的加密文件（AES-256-GCM，密钥独立
+        文件，0600）中，token 值不会进入模型上下文。修改即时生效，无需重启。
       </p>
       <div style={rowStyle}>
         <button style={buttonStyle} onClick={() => void load()} disabled={busy}>刷新</button>

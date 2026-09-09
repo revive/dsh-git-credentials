@@ -1,7 +1,7 @@
 name: release
 
 # Build the tarball in the cloud and attach it to a GitHub Release whenever a
-# v* tag is pushed (e.g. `git tag v0.3.1 && git push origin v0.3.1`).
+# v* tag is pushed (e.g. `git tag v<version> && git push origin v<version>`).
 #
 # The build is self-contained: `pnpm build` (tsdown) compiles the node half and
 # the browser bundle from source with no deepseek-harness checkout needed.

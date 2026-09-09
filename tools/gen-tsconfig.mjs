@@ -37,6 +37,10 @@ const basePaths = base.compilerOptions.paths
 /** Exact subpath entries the repo resolves through per-package node_modules; spelled for this out-of-tree consumer. */
 const EXTRA_PATHS = {
   '@deepseek-ai/dsh-client-ui-settings/client': [`${REPO}/packages/client/ui-settings/src/client/index.ts`],
+  // The subagent projection module (its declaration merge into
+  // SessionProjectionStateMap), which smoke.ts pulls in type-only; the repo
+  // exposes no typed subpath for it, so map it explicitly.
+  '@deepseek-ai/dsh-subagent/projection': [`${REPO}/packages/subagent/subagent/src/projection.ts`],
 }
 
 /** Groups whose sources compile under repo face aggregates (client face, remotes split); an out-of-tree program must consume their BUILT declarations instead of src. */

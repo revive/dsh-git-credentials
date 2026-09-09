@@ -17,6 +17,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { boot, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
+// Type-only: pulls the subagent projection's SessionProjectionStateMap merge
+// into this out-of-tree program; the program already sees the matching wire
+// map merge through the subagent package's index, and without the state merge
+// session-projection's map constraints fail in a consumer program.
+import type {} from '@deepseek-ai/dsh-subagent/projection'
 import { GitLabClient } from './src/gitlab.ts'
 import { GitHubClient } from './src/github.ts'
 import { GiteeClient } from './src/gitee.ts'
@@ -115,7 +120,10 @@ try {
   ] as const
   // Bitbucket has no releases API, so it is exempt from the release methods.
   const RELEASE_SURFACE = ['listReleases', 'createRelease', 'deleteRelease'] as const
-  const surfaces: Array<{ ctor: new () => object; methods: readonly string[] }> = [
+  // The constructors take (tokens, site); `new (...args: never[]) => object`
+  // is the argument-agnostic constructor shape the probe (Object.create over
+  // the prototype) only needs.
+  const surfaces: Array<{ ctor: new (...args: never[]) => object; methods: readonly string[] }> = [
     { ctor: GitLabClient, methods: [...SURFACE, ...RELEASE_SURFACE] },
     { ctor: GitHubClient, methods: [...SURFACE, ...RELEASE_SURFACE] },
     { ctor: GiteeClient, methods: [...SURFACE, ...RELEASE_SURFACE] },

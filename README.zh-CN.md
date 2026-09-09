@@ -56,7 +56,7 @@ GitHub 发布了官方 MCP server，harness 也原生支持 MCP 客户端——�
 从 [releases 页面](https://github.com/revive/dsh-git-credentials/releases) 下载 `dsh-git-credentials-<version>.tgz`——tarball 自带构建好的浏览器 bundle，无需 harness 检出、无需构建——然后用 `dsh` CLI 装进 profile：
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.3.1.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.3.2.tgz
 ```
 
 首次使用会初始化 profile、pnpm 链接包，`dsh` 自动把插件追加进 profile 的 bundle 层。不 boot 先验证层：
@@ -151,6 +151,8 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 ## 开发
 
 前置条件：一份 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 检出。开发工具链由 harness 提供：把 `DSH_REPO` 指向检出目录，并将其 `node_modules/.bin` 加入 `PATH`（`@deepseek-ai/*` 为私有包，通过 harness 的 tsconfig paths 解析）。
+
+浏览器半边面向当前的客户端 slot 标准（harness 0.1.5-alpha.1 及以后）：面板是 `settings.section` 列表项，组件接收组合后的 section props；typecheck 程序通过 type-only import 引入 slot 契约。请针对实际运行的检出做类型检查——切换 harness 版本后重新生成 `tsconfig.json`。
 
 ```sh
 export DSH_REPO=/path/to/deepseek-harness
