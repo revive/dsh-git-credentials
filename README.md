@@ -201,7 +201,7 @@ git-credentials/
   tsdown.config.ts        # self-contained build (node half + browser bundle, no harness checkout)
   smoke.ts                # keyless boot smoke (incl. encrypted-store round-trip assertions)
   tools/gen-tsconfig.mjs  # regenerates tsconfig.json paths for this checkout (DSH_REPO-driven)
-  src/index.ts            # plugin entry: 8 tool registrations + admin route wiring
+  src/index.ts            # plugin entry: 24 tool registrations + admin route wiring
   src/store.ts            # AES-256-GCM encrypted storage (independent key, atomic write, 0600)
   src/http.ts             # shared HTTP helpers (token resolution, pagination, error detail)
   src/gitlab.ts           # GitLabClient (PRIVATE-TOKEN header)
@@ -217,26 +217,32 @@ git-credentials/
 
 ## Publishing
 
-The package is shaped as a dsh **bundle**: `dsh.bundle.patch` points at `cordis.patch.yml`, so users install it with `dsh plugin --profile <name> add dsh-git-credentials` and it joins the profile's bundle layers. The runtime resolves the plugin's `@deepseek-ai/*` imports from the installation's flat fallback (`$DSH_HOME/profiles/node_modules`), so the peerDependencies declare the **published** version line (`@deepseek-ai/cordis ^4.0.1-rc.1`, `@deepseek-ai/dsh-tools ^0.0.1-rc.1`, `@deepseek-ai/schemastery ^3.18.1-rc.1`) — never the dev-workspace `0.1.0-rc.5` versions.
+The package is shaped as a dsh **bundle**: `dsh.bundle.patch` points at `cordis.patch.yml`, so users install it with `dsh plugin --profile <name> add dsh-git-credentials` and it joins the profile's bundle layers. The runtime resolves the plugin's `@deepseek-ai/*` imports from the installation's flat fallback (`$DSH_HOME/profiles/node_modules`), so the peerDependencies declare the **published** version line (`@deepseek-ai/cordis ^4.0.1-rc.1`, `@deepseek-ai/dsh-tools ^0.1.7-rc.1`, `@deepseek-ai/schemastery ^3.18.1-rc.1`) — never the dev-workspace `0.1.0-rc.5` versions. Harness packages version in lockstep with the product, and DSH admits a bundle only while those ranges match the running harness, so `@deepseek-ai/dsh-tools` is the line to bump when adapting to a new harness generation (see Development).
 
-**Every GitHub release attaches the packed tarball** — that is the current distribution channel (npm publication is pending account 2FA). Pushing a `v*` tag triggers [GitHub Actions](.github/workflows/release.yml) to build the node half + browser bundle in the cloud, pack the tarball, and attach it to the release. The same pipeline, by hand:
+Two channels carry the same packed artifact:
 
-```sh
-# Build the node half + browser bundle (self-contained, no harness checkout
-# needed), then pack
-pnpm build
-pnpm pack                       # -> dsh-git-credentials-<version>.tgz
-```
+- **npm** — `pnpm publish` ships the built package to the public registry; `publishConfig` pins `https://registry.npmjs.org/`, so a mirror configured in the local npm client cannot misroute the publish. `lib/` is gitignored but whitelisted in `files`, so **build first**:
 
-Attach the tarball to the release (or install it locally):
+  ```sh
+  pnpm build
+  pnpm publish
+  ```
 
-```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-<version>.tgz
-```
+  Users then install with `dsh plugin --profile <name> add dsh-git-credentials`.
+- **GitHub release** — pushing a `v*` tag triggers [GitHub Actions](.github/workflows/release.yml) to build the node half + browser bundle in the cloud, pack the tarball, and attach it to the release. The same pipeline, by hand:
 
-Once an npm account is available, publish the same tarball contents with `npm publish --registry=https://registry.npmjs.org/`, and users switch to `dsh plugin add dsh-git-credentials`.
+  ```sh
+  pnpm build
+  pnpm pack                       # -> dsh-git-credentials-<version>.tgz
+  ```
 
-Verify a tarball locally before publishing: `dsh plugin --profile <name> add <tarball>`, confirm `dsh --profile <name> --dump-config` shows the `# == dsh-git-credentials` layer, then boot the profile and check the eight tools register.
+  Attach that tarball to the release, or install it directly:
+
+  ```sh
+  dsh plugin --profile <name> add ./dsh-git-credentials-<version>.tgz
+  ```
+
+Verify the artifact locally before announcing it — `dsh plugin --profile <name> add <tarball|package>`, confirm `dsh --profile <name> --dump-config` shows the `# == dsh-git-credentials` layer, then boot the profile and check the 24 tools register.
 
 ## License
 

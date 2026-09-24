@@ -200,7 +200,7 @@ git-credentials/
   tsdown.config.ts        # 自包含构建（node 半 + 浏览器 bundle，不依赖 harness 检出）
   smoke.ts                # keyless 启动冒烟（含加密存储回读断言）
   tools/gen-tsconfig.mjs  # 重新生成 tsconfig.json paths（DSH_REPO 驱动）
-  src/index.ts            # 插件入口：8 个工具注册 + 管理路由接线
+  src/index.ts            # 插件入口：24 个工具注册 + 管理路由接线
   src/store.ts            # AES-256-GCM 加密存储（独立密钥、原子写、0600）
   src/http.ts             # 共享 HTTP 助手（token 解析、分页、错误明细）
   src/gitlab.ts           # GitLabClient（PRIVATE-TOKEN 头）
@@ -216,25 +216,32 @@ git-credentials/
 
 ## 发布
 
-包已按 dsh **bundle** 形态组织：`dsh.bundle.patch` 指向 `cordis.patch.yml`，用户执行 `dsh plugin --profile <name> add dsh-git-credentials` 即可安装并加入 profile 的 bundle 层。运行时通过安装自身的 flat fallback（`$DSH_HOME/profiles/node_modules`）解析插件的 `@deepseek-ai/*` 依赖，因此 peerDependencies 声明的是 **npm 已发布版本线**（`@deepseek-ai/cordis ^4.0.1-rc.1`、`@deepseek-ai/dsh-tools ^0.0.1-rc.1`、`@deepseek-ai/schemastery ^3.18.1-rc.1`）——切勿用开发工作区的 `0.1.0-rc.5` 版本。
+包已按 dsh **bundle** 形态组织：`dsh.bundle.patch` 指向 `cordis.patch.yml`，用户执行 `dsh plugin --profile <name> add dsh-git-credentials` 即可安装并加入 profile 的 bundle 层。运行时通过安装自身的 flat fallback（`$DSH_HOME/profiles/node_modules`）解析插件的 `@deepseek-ai/*` 依赖，因此 peerDependencies 声明的是 **npm 已发布版本线**（`@deepseek-ai/cordis ^4.0.1-rc.1`、`@deepseek-ai/dsh-tools ^0.1.7-rc.1`、`@deepseek-ai/schemastery ^3.18.1-rc.1`）——切勿用开发工作区的 `0.1.0-rc.5` 版本。harness 各包与产品版本同步发布，且 DSH 只在这些 range 与当前 harness 匹配时才准入该 bundle，因此适配新 harness 世代时要改的就是 `@deepseek-ai/dsh-tools` 这一行（见「开发」）。
 
-**每个 GitHub release 都会附带打包好的 tarball**——这是当前的分发渠道（npm 发布因账号 2FA 暂缓）。推送 `v*` tag 会触发 [GitHub Actions](.github/workflows/release.yml) 在云端构建 node 半 + 浏览器 bundle、打包 tarball 并挂到 release。同一流程手动执行：
+两个渠道分发同一份打包产物：
 
-```sh
-# 先构建 node 半 + 浏览器 bundle（自包含，不需要 harness 检出），再打包
-pnpm build
-pnpm pack                       # -> dsh-git-credentials-<version>.tgz
-```
+- **npm** —— `pnpm publish` 把构建好的包发布到公共 registry；`publishConfig` 已固定 `https://registry.npmjs.org/`，本地 npm 客户端即使配了镜像也不会发错地方。`lib/` 被 gitignore 但在 `files` 白名单里，所以**必须先构建**：
 
-把 tarball 挂到 release（或本地直接安装）：
+  ```sh
+  pnpm build
+  pnpm publish
+  ```
 
-```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-<version>.tgz
-```
+  用户随后用 `dsh plugin --profile <name> add dsh-git-credentials` 安装。
+- **GitHub release** —— 推送 `v*` tag 会触发 [GitHub Actions](.github/workflows/release.yml) 在云端构建 node 半 + 浏览器 bundle、打包 tarball 并挂到 release。同一流程手动执行：
 
-将来 npm 账号可用后，同一份 tarball 内容用 `npm publish --registry=https://registry.npmjs.org/` 发布，用户即可改用 `dsh plugin add dsh-git-credentials`。
+  ```sh
+  pnpm build
+  pnpm pack                       # -> dsh-git-credentials-<version>.tgz
+  ```
 
-发布前先在本地验证 tarball：`dsh plugin --profile <name> add <tarball>`，确认 `dsh --profile <name> --dump-config` 出现 `# == dsh-git-credentials` 层，再 boot profile 检查 8 个工具是否注册。
+  把该 tarball 挂到 release，或本地直接安装：
+
+  ```sh
+  dsh plugin --profile <name> add ./dsh-git-credentials-<version>.tgz
+  ```
+
+对外公布前先在本地验证产物：`dsh plugin --profile <name> add <tarball|包名>`，确认 `dsh --profile <name> --dump-config` 出现 `# == dsh-git-credentials` 层，再 boot profile 检查 24 个工具是否注册。
 
 ## License
 
