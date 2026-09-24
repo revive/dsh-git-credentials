@@ -56,7 +56,7 @@ Losing the key file means the data is unrecoverable (decryption fails loud and r
 Download `dsh-git-credentials-<version>.tgz` from the [releases page](https://github.com/revive/dsh-git-credentials/releases) — the tarball ships the built browser bundle, so no harness checkout or build step is needed — then install it into a profile with the `dsh` CLI:
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.3.2.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.3.3.tgz
 ```
 
 The first use initializes the profile, pnpm links the package, and `dsh` appends the plugin to the profile's bundle layers. Verify the layer without booting:
@@ -152,7 +152,19 @@ One resource tool per provider, with an `action` parameter selecting the operati
 
 Prerequisites: a clone of [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness). The dev toolchain is harness-backed: point `DSH_REPO` at the checkout and put its `node_modules/.bin` on `PATH` (the harness's `@deepseek-ai/*` packages are private and resolve through its tsconfig paths).
 
-The browser half targets the current client slot standard (harness 0.1.5-alpha.1 and later): the panel is a `settings.section` list entry whose component receives the composed section props, and the typecheck program pulls the slot contracts through type-only imports. Typecheck against the checkout you actually run — regenerate `tsconfig.json` after switching harness versions.
+The browser half targets the current client slot standard: the panel is a `settings.section` list entry whose component receives the composed section props, and the typecheck program pulls the slot contracts through type-only imports. Typecheck against the checkout you actually run — regenerate `tsconfig.json` after switching harness versions.
+
+**Harness compatibility is enforced from the manifest.** DSH reads this package's `peerDependencies` on `@deepseek-ai/dsh` and `@deepseek-ai/dsh-*` and refuses to apply the bundle layer unless every range matches the running harness version (prereleases included); a refused bundle contributes no tools and no settings page, and the harness reports the refused peers. The `@deepseek-ai/dsh-tools` range is therefore the one to bump when adapting to a new harness generation (harness packages version in lockstep with the product). Verify a package against a checkout without installing it — the check itself takes only the manifest:
+
+```sh
+node --input-type=module -e "
+import { readFileSync } from 'node:fs'
+const { evaluatePluginCompatibility, pluginCompatibilityWarning } = await import('$DSH_REPO/packages/boot/app-boot/lib/index.js')
+const manifest = JSON.parse(readFileSync('./package.json', 'utf8'))
+const issue = evaluatePluginCompatibility(manifest)
+console.log(issue === undefined ? 'compatible' : pluginCompatibilityWarning(issue))
+"
+```
 
 ```sh
 export DSH_REPO=/path/to/deepseek-harness

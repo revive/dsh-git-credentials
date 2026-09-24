@@ -37,10 +37,17 @@ const basePaths = base.compilerOptions.paths
 /** Exact subpath entries the repo resolves through per-package node_modules; spelled for this out-of-tree consumer. */
 const EXTRA_PATHS = {
   '@deepseek-ai/dsh-client-ui-settings/client': [`${REPO}/packages/client/ui-settings/src/client/index.ts`],
-  // The subagent projection module (its declaration merge into
-  // SessionProjectionStateMap), which smoke.ts pulls in type-only; the repo
-  // exposes no typed subpath for it, so map it explicitly.
-  '@deepseek-ai/dsh-subagent/projection': [`${REPO}/packages/subagent/subagent/src/projection.ts`],
+  // The session-projection registry reaches this program through the boot
+  // chain (smoke.ts). Its src is compiled by the repo with every domain
+  // declaration merge present; an out-of-tree program sees only the subset
+  // its own imports pull in, so the registry's generic map constraints fail
+  // on the missing keys. Consume the BUILT declarations instead, for the
+  // entry and its merge-bearing types module alike, so the domain
+  // augmentations (also consumed as built declarations) attach to the same
+  // module the registry reads — and skipLibCheck keeps the package's own
+  // source consistency out of this program's diagnostics.
+  '@deepseek-ai/dsh-session-projection': [`${REPO}/packages/session/session-projection/lib/types`],
+  '@deepseek-ai/dsh-session-projection/types': [`${REPO}/packages/session/session-projection/lib/types/types.d.ts`],
 }
 
 /** Groups whose sources compile under repo face aggregates (client face, remotes split); an out-of-tree program must consume their BUILT declarations instead of src. */

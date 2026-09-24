@@ -56,7 +56,7 @@ GitHub 发布了官方 MCP server，harness 也原生支持 MCP 客户端——�
 从 [releases 页面](https://github.com/revive/dsh-git-credentials/releases) 下载 `dsh-git-credentials-<version>.tgz`——tarball 自带构建好的浏览器 bundle，无需 harness 检出、无需构建——然后用 `dsh` CLI 装进 profile：
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.3.2.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.3.3.tgz
 ```
 
 首次使用会初始化 profile、pnpm 链接包，`dsh` 自动把插件追加进 profile 的 bundle 层。不 boot 先验证层：
@@ -152,7 +152,19 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 
 前置条件：一份 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 检出。开发工具链由 harness 提供：把 `DSH_REPO` 指向检出目录，并将其 `node_modules/.bin` 加入 `PATH`（`@deepseek-ai/*` 为私有包，通过 harness 的 tsconfig paths 解析）。
 
-浏览器半边面向当前的客户端 slot 标准（harness 0.1.5-alpha.1 及以后）：面板是 `settings.section` 列表项，组件接收组合后的 section props；typecheck 程序通过 type-only import 引入 slot 契约。请针对实际运行的检出做类型检查——切换 harness 版本后重新生成 `tsconfig.json`。
+浏览器半边面向当前的客户端 slot 标准：面板是 `settings.section` 列表项，组件接收组合后的 section props；typecheck 程序通过 type-only import 引入 slot 契约。请针对实际运行的检出做类型检查——切换 harness 版本后重新生成 `tsconfig.json`。
+
+**harness 兼容性由 manifest 强制把关。** DSH 会读取本包的 `peerDependencies` 中所有 `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh-*` 声明，只要有一个 range 不匹配当前运行的 harness 版本（含预发布版），就拒绝应用该 bundle 层：被拒的 bundle 不贡献任何工具与设置页，harness 会报告被拒的 peer。因此适配新 harness 世代时，要改的就是 `@deepseek-ai/dsh-tools` 这一项（harness 各包与产品版本同步发布）。不安装也能校验——这个检查只读 manifest：
+
+```sh
+node --input-type=module -e "
+import { readFileSync } from 'node:fs'
+const { evaluatePluginCompatibility, pluginCompatibilityWarning } = await import('$DSH_REPO/packages/boot/app-boot/lib/index.js')
+const manifest = JSON.parse(readFileSync('./package.json', 'utf8'))
+const issue = evaluatePluginCompatibility(manifest)
+console.log(issue === undefined ? 'compatible' : pluginCompatibilityWarning(issue))
+"
+```
 
 ```sh
 export DSH_REPO=/path/to/deepseek-harness

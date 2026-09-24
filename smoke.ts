@@ -17,11 +17,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { boot, loadOverlayPatches } from '@deepseek-ai/dsh-app-boot'
-// Type-only: pulls the subagent projection's SessionProjectionStateMap merge
-// into this out-of-tree program; the program already sees the matching wire
-// map merge through the subagent package's index, and without the state merge
-// session-projection's map constraints fail in a consumer program.
-import type {} from '@deepseek-ai/dsh-subagent/projection'
 import { GitLabClient } from './src/gitlab.ts'
 import { GitHubClient } from './src/github.ts'
 import { GiteeClient } from './src/gitee.ts'
