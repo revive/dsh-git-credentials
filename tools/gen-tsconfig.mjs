@@ -12,7 +12,7 @@
  * @module gen-tsconfig
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 // Out-of-tree development needs the harness checkout explicitly; no
@@ -66,8 +66,13 @@ for (const [key, targets] of Object.entries(basePaths)) {
     }
     if (FACE_GROUPS.some(group => rest.startsWith(group))) {
       // Any src/ subtree (package root, subpath file, or subpath directory)
-      // maps to the matching built declaration subtree under lib/types.
-      return `${REPO}/${rest.replace('/src/', '/lib/types/').replace(/\.ts$/, '.d.ts')}`
+      // maps to the matching built declaration subtree under lib/types. A
+      // checkout that has not built its client face yet has no such file
+      // (only some faces emit lib/types/client/**), so fall back to that
+      // face's source: the program then still resolves the import and still
+      // receives the face's own Context/Event declaration merges.
+      const built = `${REPO}/${rest.replace('/src/', '/lib/types/').replace(/\.ts$/, '.d.ts')}`
+      return existsSync(built) ? built : `${REPO}/${rest}`
     }
     return `${REPO}/${rest}`
   })

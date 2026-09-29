@@ -56,7 +56,7 @@ Losing the key file means the data is unrecoverable (decryption fails loud and r
 Download `dsh-git-credentials-<version>.tgz` from the [releases page](https://github.com/revive/dsh-git-credentials/releases) — the tarball ships the built browser bundle, so no harness checkout or build step is needed — then install it into a profile with the `dsh` CLI:
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.3.3.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.3.4.tgz
 ```
 
 The first use initializes the profile, pnpm links the package, and `dsh` appends the plugin to the profile's bundle layers. Verify the layer without booting:
@@ -152,9 +152,9 @@ One resource tool per provider, with an `action` parameter selecting the operati
 
 Prerequisites: a clone of [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness). The dev toolchain is harness-backed: point `DSH_REPO` at the checkout and put its `node_modules/.bin` on `PATH` (the harness's `@deepseek-ai/*` packages are private and resolve through its tsconfig paths).
 
-The browser half targets the current client slot standard: the panel is a `settings.section` list entry whose component receives the composed section props, and the typecheck program pulls the slot contracts through type-only imports. Typecheck against the checkout you actually run — regenerate `tsconfig.json` after switching harness versions.
+The browser half targets the current client slot standard: the panel is a `settings.section` list entry whose component receives the composed section props, and the typecheck program pulls the slot contracts through type-only imports. Typecheck against the checkout you actually run — regenerate `tsconfig.json` after switching harness versions. A checkout that has not built its client face yet falls back to those packages' sources; if the report names errors inside `packages/.../src`, build the face first with `pnpm run build:lib:client` in the checkout and typecheck again.
 
-**Harness compatibility is enforced from the manifest.** DSH reads this package's `peerDependencies` on `@deepseek-ai/dsh` and `@deepseek-ai/dsh-*` and refuses to apply the bundle layer unless every range matches the running harness version (prereleases included); a refused bundle contributes no tools and no settings page, and the harness reports the refused peers. The `@deepseek-ai/dsh-tools` range is therefore the one to bump when adapting to a new harness generation (harness packages version in lockstep with the product). Verify a package against a checkout without installing it — the check itself takes only the manifest:
+**Harness compatibility is enforced from the manifest.** DSH reads this package's `peerDependencies` on `@deepseek-ai/dsh` and `@deepseek-ai/dsh-*` and refuses to apply the bundle layer unless every range matches the running harness version (prereleases included); a refused bundle contributes no tools and no settings page, and the harness reports the refused peers. The `@deepseek-ai/dsh-tools` range is deliberately wide — `>=0.1.7-rc.1 <1.0.0` — so that a harness bump inside the 0.x line never refuses the bundle on its own (harness packages version in lockstep with the product). A new harness release is therefore handled as: regenerate `tsconfig.json`, `pnpm typecheck`, `pnpm smoke`; touch the range only when one of those actually fails, and treat `<1.0.0` as the re-validation boundary. Verify a package against a checkout without installing it — the check itself takes only the manifest:
 
 ```sh
 node --input-type=module -e "
@@ -217,7 +217,7 @@ git-credentials/
 
 ## Publishing
 
-The package is shaped as a dsh **bundle**: `dsh.bundle.patch` points at `cordis.patch.yml`, so users install it with `dsh plugin --profile <name> add dsh-git-credentials` and it joins the profile's bundle layers. The runtime resolves the plugin's `@deepseek-ai/*` imports from the installation's flat fallback (`$DSH_HOME/profiles/node_modules`), so the peerDependencies declare the **published** version line (`@deepseek-ai/cordis ^4.0.1-rc.1`, `@deepseek-ai/dsh-tools ^0.1.7-rc.1`, `@deepseek-ai/schemastery ^3.18.1-rc.1`) — never the dev-workspace `0.1.0-rc.5` versions. Harness packages version in lockstep with the product, and DSH admits a bundle only while those ranges match the running harness, so `@deepseek-ai/dsh-tools` is the line to bump when adapting to a new harness generation (see Development).
+The package is shaped as a dsh **bundle**: `dsh.bundle.patch` points at `cordis.patch.yml`, so users install it with `dsh plugin --profile <name> add dsh-git-credentials` and it joins the profile's bundle layers. The runtime resolves the plugin's `@deepseek-ai/*` imports from the installation's flat fallback (`$DSH_HOME/profiles/node_modules`), so the peerDependencies declare the **published** version line (`@deepseek-ai/cordis ^4.0.1-rc.1`, `@deepseek-ai/dsh-tools >=0.1.7-rc.1 <1.0.0`, `@deepseek-ai/schemastery ^3.18.1-rc.1`) — never the dev-workspace `0.1.0-rc.5` versions. Harness packages version in lockstep with the product, and DSH admits a bundle only while those ranges match the running harness; the `dsh-tools` range deliberately spans the whole 0.x line, so a harness bump alone never forces a plugin release (see Development).
 
 Two channels carry the same packed artifact:
 
