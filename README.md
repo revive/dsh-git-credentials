@@ -56,7 +56,7 @@ Losing the key file means the data is unrecoverable (decryption fails loud and r
 Download `dsh-git-credentials-<version>.tgz` from the [releases page](https://github.com/revive/dsh-git-credentials/releases) — the tarball ships the built browser bundle, so no harness checkout or build step is needed — then install it into a profile with the `dsh` CLI:
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.3.4.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.4.0.tgz
 ```
 
 The first use initializes the profile, pnpm links the package, and `dsh` appends the plugin to the profile's bundle layers. Verify the layer without booting:
@@ -101,37 +101,37 @@ Manage sites and tokens in **Settings → Git Credentials**:
 
 ### Tools
 
-One resource tool per provider, with an `action` parameter selecting the operation. All actions return the provider's canonical summary shapes (repos: `{id, path, name, webUrl, visibility}`; issues/PRs: `{number|iid, title, state, webUrl, authorName}`; file: `{path, ref, content, truncated}`). Write actions perform a real mutation — the model should confirm with the user before calling them.
+One resource tool per provider, with an `action` parameter selecting the operation. List actions return the provider's canonical summary shapes (repos: `{id, path, name, webUrl, visibility}`; issues/PRs: `{number|iid, title, state, webUrl, authorName}`; file: `{path, ref, content, truncated}`). `get` reads one issue or merge/pull request in full — that summary plus `body`, `labels`, `createdAt`, `updatedAt`, `bodyTruncated`, and (on merge/pull requests) `sourceBranch`, `targetBranch`, and `draft`; the body is capped at the configured byte limit and a capped read is flagged. Write actions perform a real mutation — the model should confirm with the user before calling them.
 
 | Tool | `action` | Parameters |
 |---|---|---|
 | `gitlab_projects` | `list`, `create` | list: `search?`, `membership?`, `perPage?` · create: `name`, `description?`, `path?`, `visibility?` |
 | `gitlab_file` | `read` | `project`, `path`, `ref?` |
-| `gitlab_merge_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `sourceBranch`, `targetBranch`, `body?` |
-| `gitlab_issues` | `list`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
+| `gitlab_merge_requests` | `list`, `get`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `sourceBranch`, `targetBranch`, `body?` |
+| `gitlab_issues` | `list`, `get`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
 | `github_repos` | `list`, `create` | list: `search?`, `perPage?` · create: `name`, `description?`, `private?` |
 | `github_file` | `read` | `project` (owner/repo), `path`, `ref?` |
-| `github_pull_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
-| `github_issues` | `list`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
+| `github_pull_requests` | `list`, `get`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
+| `github_issues` | `list`, `get`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
 | `gitee_repos` | `list`, `create` | list: `search?`, `perPage?` · create: `name`, `description?`, `private?` |
 | `gitee_file` | `read` | `project` (owner/repo), `path`, `ref?` |
-| `gitee_pull_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
-| `gitee_issues` | `list`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
+| `gitee_pull_requests` | `list`, `get`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
+| `gitee_issues` | `list`, `get`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
 | `gitea_repos` | `list`, `create` | list: `search?`, `perPage?` · create: `name`, `description?`, `private?` |
 | `gitea_file` | `read` | `project` (owner/repo), `path`, `ref?` |
-| `gitea_pull_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
-| `gitea_issues` | `list`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
+| `gitea_pull_requests` | `list`, `get`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
+| `gitea_issues` | `list`, `get`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
 | `gitlab_releases` | `list`, `create`, `delete` | `project?`, `perPage?`, `tag` (create requires; delete deletes by tag on GitLab), `name?`, `body?`, `draft?`, `prerelease?` |
 | `github_releases` | `list`, `create`, `delete` | `project?`, `perPage?`, `tag`, `number` (release id, required for delete), `name?`, `body?`, `draft?`, `prerelease?` |
 | `gitee_releases` | `list`, `create`, `delete` | `project?`, `perPage?`, `tag`, `number` (release id, required for delete), `name?`, `body?`, `draft?`, `prerelease?` |
 | `gitea_releases` | `list`, `create`, `delete` | `project?`, `perPage?`, `tag`, `number` (release id, required for delete), `name?`, `body?`, `draft?`, `prerelease?` |
 | `bitbucket_repos` | `list`, `create` | list: `search?`, `perPage?` · create: `name`, `description?`, `private?` |
 | `bitbucket_file` | `read` | `project` (workspace/repo), `path`, `ref?` |
-| `bitbucket_pull_requests` | `list`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
-| `bitbucket_issues` | `list`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
+| `bitbucket_pull_requests` | `list`, `get`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `head`, `base`, `body?` |
+| `bitbucket_issues` | `list`, `get`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
 
 - `action` defaults to the read operation (`list`, or `read` for file) — existing read callers keep working unchanged
-- `number` is the issue/PR number (iid on GitLab); required for `close` / `reopen` / `comment` / `merge`
+- `number` is the issue/PR number (iid on GitLab); required for `get` / `close` / `reopen` / `comment` / `merge`
 - `state` values: GitLab `opened`/`closed`/`all` (`merged` for MRs), the others `open`/`closed`/`all`
 - `file` always reads: `project`, `path`, `ref?` (defaults to the repository default branch; content over the byte cap is truncated and flagged)
 - `bitbucket_repos` create needs the site's `defaultProject` (`workspace/repo`) to know which workspace to create in
@@ -210,7 +210,6 @@ git-credentials/
   src/gitea.ts            # GiteaClient (token header)
   src/bitbucket.ts        # BitbucketClient (Bearer header, 2.0 API)
   src/admin.ts            # /git-credentials-admin/* management endpoints
-  src/invariant.ts        # invariant companion (out-of-tree rationale)
   src/client/             # browser half: the Settings → Git Credentials panel
   lib/                    # build output (node half + client bundle, gitignored)
 ```

@@ -56,7 +56,7 @@ GitHub 发布了官方 MCP server，harness 也原生支持 MCP 客户端——�
 从 [releases 页面](https://github.com/revive/dsh-git-credentials/releases) 下载 `dsh-git-credentials-<version>.tgz`——tarball 自带构建好的浏览器 bundle，无需 harness 检出、无需构建——然后用 `dsh` CLI 装进 profile：
 
 ```sh
-dsh plugin --profile <name> add ./dsh-git-credentials-0.3.4.tgz
+dsh plugin --profile <name> add ./dsh-git-credentials-0.4.0.tgz
 ```
 
 首次使用会初始化 profile、pnpm 链接包，`dsh` 自动把插件追加进 profile 的 bundle 层。不 boot 先验证层：
@@ -101,37 +101,37 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 
 ### 工具
 
-每个平台一个资源工具，`action` 参数选择操作。所有 action 返回该平台的规范摘要形状（仓库：`{id, path, name, webUrl, visibility}`；issue/PR：`{number|iid, title, state, webUrl, authorName}`；文件：`{path, ref, content, truncated}`）。写操作会真实修改远端——模型调用前应与用户确认。
+每个平台一个资源工具，`action` 参数选择操作。list 类 action 返回该平台的规范摘要形状（仓库：`{id, path, name, webUrl, visibility}`；issue/PR：`{number|iid, title, state, webUrl, authorName}`；文件：`{path, ref, content, truncated}`）。`get` 完整读取单个 issue 或 MR/PR——在摘要之外附 `body`、`labels`、`createdAt`、`updatedAt`、`bodyTruncated`，MR/PR 另有 `sourceBranch`、`targetBranch`、`draft`；正文按配置的字节上限截断，被截断时会显式标记。写操作会真实修改远端——模型调用前应与用户确认。
 
 | 工具 | `action` | 参数 |
 |---|---|---|
 | `gitlab_projects` | `list`、`create` | list: `search?`、`membership?`、`perPage?` · create: `name`、`description?`、`path?`、`visibility?` |
 | `gitlab_file` | `read` | `project`、`path`、`ref?` |
-| `gitlab_merge_requests` | `list`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`sourceBranch`、`targetBranch`、`body?` |
-| `gitlab_issues` | `list`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
+| `gitlab_merge_requests` | `list`、`get`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`sourceBranch`、`targetBranch`、`body?` |
+| `gitlab_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
 | `github_repos` | `list`、`create` | list: `search?`、`perPage?` · create: `name`、`description?`、`private?` |
 | `github_file` | `read` | `project`（owner/repo）、`path`、`ref?` |
-| `github_pull_requests` | `list`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
-| `github_issues` | `list`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
+| `github_pull_requests` | `list`、`get`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
+| `github_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
 | `gitee_repos` | `list`、`create` | list: `search?`、`perPage?` · create: `name`、`description?`、`private?` |
 | `gitee_file` | `read` | `project`（owner/repo）、`path`、`ref?` |
-| `gitee_pull_requests` | `list`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
-| `gitee_issues` | `list`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
+| `gitee_pull_requests` | `list`、`get`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
+| `gitee_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
 | `gitea_repos` | `list`、`create` | list: `search?`、`perPage?` · create: `name`、`description?`、`private?` |
 | `gitea_file` | `read` | `project`（owner/repo）、`path`、`ref?` |
-| `gitea_pull_requests` | `list`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
-| `gitea_issues` | `list`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
+| `gitea_pull_requests` | `list`、`get`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
+| `gitea_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
 | `gitlab_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`（create 必需；GitLab 按 tag 删除）、`name?`、`body?`、`draft?`、`prerelease?` |
 | `github_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`、`number`（release id，delete 必需）、`name?`、`body?`、`draft?`、`prerelease?` |
 | `gitee_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`、`number`（release id，delete 必需）、`name?`、`body?`、`draft?`、`prerelease?` |
 | `gitea_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`、`number`（release id，delete 必需）、`name?`、`body?`、`draft?`、`prerelease?` |
 | `bitbucket_repos` | `list`、`create` | list: `search?`、`perPage?` · create: `name`、`description?`、`private?` |
 | `bitbucket_file` | `read` | `project`（workspace/repo）、`path`、`ref?` |
-| `bitbucket_pull_requests` | `list`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
-| `bitbucket_issues` | `list`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
+| `bitbucket_pull_requests` | `list`、`get`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
+| `bitbucket_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
 
 - `action` 默认读操作（`list`；file 为 `read`）——现有读调用不受影响
-- `number` 是 issue/PR 编号（GitLab 为 iid）；`close` / `reopen` / `comment` / `merge` 必需
+- `number` 是 issue/PR 编号（GitLab 为 iid）；`get` / `close` / `reopen` / `comment` / `merge` 必需
 - `state` 取值：GitLab `opened`/`closed`/`all`（MR 另有 `merged`），其余平台 `open`/`closed`/`all`
 - `file` 恒为读取：`project`、`path`、`ref?`（默认分支；超过字节上限截断并标记）
 - `bitbucket_repos` 的 create 需要站点 `defaultProject`（`workspace/repo`）才能确定 workspace
@@ -209,7 +209,6 @@ git-credentials/
   src/gitea.ts            # GiteaClient（token 头）
   src/bitbucket.ts        # BitbucketClient（Bearer 头，2.0 API）
   src/admin.ts            # /git-credentials-admin/* 管理端点
-  src/invariant.ts        # 不变量伴生（out-of-tree 原因）
   src/client/             # browser half：设置页 Git 凭据分区
   lib/                    # 构建产物（node 半 + client bundle，已 gitignore）
 ```

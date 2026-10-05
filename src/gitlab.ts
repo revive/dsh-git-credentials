@@ -26,6 +26,18 @@ export interface GitLabListEntry {
   readonly authorName: string
 }
 
+/** One issue or merge request read in full (action "get"). */
+export interface GitLabEntryDetail extends GitLabListEntry {
+  readonly body: string
+  readonly labels: string[]
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly bodyTruncated: boolean
+  readonly sourceBranch?: string
+  readonly targetBranch?: string
+  readonly draft?: boolean
+}
+
 /** A repository file read through the GitLab API. */
 export interface GitLabFile {
   readonly path: string
@@ -56,6 +68,23 @@ interface RawListEntry {
   readonly state: string
   readonly web_url: string
   readonly author: { readonly name: string } | null
+}
+
+/** Raw single-issue/merge-request payload (the subset action "get" reports). */
+interface RawDetail {
+  readonly iid: number
+  readonly title: string
+  readonly state: string
+  readonly web_url: string
+  readonly author: { readonly name: string } | null
+  readonly description: string | null
+  readonly labels: readonly string[]
+  readonly created_at: string
+  readonly updated_at: string
+  readonly source_branch?: string
+  readonly target_branch?: string
+  readonly draft?: boolean
+  readonly work_in_progress?: boolean
 }
 
 /**
@@ -157,6 +186,44 @@ export class GitLabClient {
     readonly signal?: AbortSignal
   }): Promise<GitLabListEntry[]> {
     return this.listEntries('/issues', options.project, options.state ?? 'opened', options.perPage, options.signal)
+  }
+
+  /**
+   * Read one issue in full (action "get"): description, labels, and timestamps.
+   * @param options - project (site default when omitted), issue iid, byte cap, cancellation.
+   * @returns the issue detail (description capped at maxBytes and flagged).
+   */
+  async getIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<GitLabEntryDetail> {
+    const project = encodeURIComponent(this.resolveProject(options.project))
+    const raw = await this.get<RawDetail>(
+      `/projects/${project}/issues/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapDetail(raw, options.maxBytes, false)
+  }
+
+  /**
+   * Read one merge request in full (action "get"): description, branches, labels, timestamps.
+   * @param options - project (site default when omitted), MR iid, byte cap, cancellation.
+   * @returns the merge-request detail (description capped at maxBytes and flagged).
+   */
+  async getPull(options: {
+    readonly project?: string
+    readonly number: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<GitLabEntryDetail> {
+    const project = encodeURIComponent(this.resolveProject(options.project))
+    const raw = await this.get<RawDetail>(
+      `/projects/${project}/merge_requests/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapDetail(raw, options.maxBytes, true)
   }
 
   /** Shared listing path for merge requests and issues. */
@@ -571,5 +638,30 @@ function mapEntry(entry: RawListEntry): GitLabListEntry {
     state: entry.state,
     webUrl: entry.web_url,
     authorName: entry.author?.name ?? 'unknown',
+  }
+}
+
+/** Map one raw detail payload; `pull` adds the branch pair and the draft flag. */
+function mapDetail(detail: RawDetail, maxBytes: number, pull: boolean): GitLabEntryDetail {
+  const description = detail.description ?? ''
+  const truncated = description.length > maxBytes
+  return {
+    iid: detail.iid,
+    title: detail.title,
+    state: detail.state,
+    webUrl: detail.web_url,
+    authorName: detail.author?.name ?? 'unknown',
+    body: truncated ? description.slice(0, maxBytes) : description,
+    labels: [...detail.labels],
+    createdAt: detail.created_at,
+    updatedAt: detail.updated_at,
+    bodyTruncated: truncated,
+    ...pull
+      ? {
+        sourceBranch: detail.source_branch ?? '',
+        targetBranch: detail.target_branch ?? '',
+        draft: detail.draft ?? detail.work_in_progress ?? false,
+      }
+      : {},
   }
 }

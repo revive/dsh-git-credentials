@@ -36,7 +36,13 @@ const PLUGIN = fileURLToPath(new URL('.', import.meta.url))
 
 /** Structural slice of the tool registry the smoke asserts against. */
 interface ToolRegistry {
-  get(name: string): { readonly name: string } | undefined
+  get(name: string): {
+    readonly name: string
+    /** The model-facing argument JSON Schema (only the action enum is read here). */
+    readonly parameters?: {
+      readonly properties?: { readonly action?: { readonly enum?: readonly string[] } }
+    }
+  } | undefined
 }
 
 // Isolate the smoke from any live harness home (the running GUI shares ~/.dsh).
@@ -105,11 +111,27 @@ try {
     console.log(`ok: ${name} registered`)
   }
 
+  // The read action must reach the model: every issues / merge-request /
+  // pull-request tool advertises "get" in its action enum.
+  for (const name of [
+    'gitlab_issues', 'gitlab_merge_requests',
+    'github_issues', 'github_pull_requests',
+    'gitee_issues', 'gitee_pull_requests',
+    'gitea_issues', 'gitea_pull_requests',
+    'bitbucket_issues', 'bitbucket_pull_requests',
+  ]) {
+    const actions = tools.get(name)?.parameters?.properties?.action?.enum ?? []
+    if (!actions.includes('get')) {
+      throw new Error(`tool ${name} does not expose the "get" action (enum: ${JSON.stringify(actions)})`)
+    }
+    console.log(`ok: ${name} exposes the get action`)
+  }
+
   // The forge surface contract: every client must expose every method the
   // tool factory dispatches to — a missing method would otherwise surface at
   // call time as "X is not a function" instead of failing the smoke.
   const SURFACE = [
-    'listRepos', 'readFile', 'listIssues', 'listPullRequests',
+    'listRepos', 'readFile', 'listIssues', 'listPullRequests', 'getIssue', 'getPull',
     'createRepo', 'createIssue', 'createPullRequest',
     'closeIssue', 'reopenIssue', 'commentIssue', 'mergePull', 'closePull',
   ] as const

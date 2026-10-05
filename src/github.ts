@@ -28,6 +28,18 @@ export interface GitHubEntry {
   readonly authorName: string
 }
 
+/** One issue or pull request read in full (action "get"). */
+export interface GitHubEntryDetail extends GitHubEntry {
+  readonly body: string
+  readonly labels: string[]
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly bodyTruncated: boolean
+  readonly sourceBranch?: string
+  readonly targetBranch?: string
+  readonly draft?: boolean
+}
+
 /** A repository file read through the GitHub API. */
 export interface GitHubFile {
   readonly path: string
@@ -60,6 +72,17 @@ interface RawEntry {
   readonly html_url: string
   readonly user: { readonly login: string } | null
   readonly pull_request?: unknown
+}
+
+/** Raw single-issue/pull-request payload (the subset action "get" reports). */
+interface RawDetail extends RawEntry {
+  readonly body: string | null
+  readonly labels: ReadonlyArray<{ readonly name: string }>
+  readonly created_at: string
+  readonly updated_at: string
+  readonly head?: { readonly ref: string }
+  readonly base?: { readonly ref: string }
+  readonly draft?: boolean
 }
 
 /** Raw file entry. */
@@ -186,6 +209,44 @@ export class GitHubClient {
       ...options.signal === undefined ? {} : { signal: options.signal },
     })
     return raw.map(mapEntry)
+  }
+
+  /**
+   * Read one issue in full (action "get"): body, labels, and timestamps.
+   * @param options - project (site default when omitted), issue number, byte cap, cancellation.
+   * @returns the issue detail (body capped at maxBytes and flagged).
+   */
+  async getIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<GitHubEntryDetail> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.get<RawDetail>(
+      `/repos/${owner}/${repo}/issues/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapDetail(raw, options.maxBytes, false)
+  }
+
+  /**
+   * Read one pull request in full (action "get"): body, branches, labels, timestamps.
+   * @param options - project (site default when omitted), PR number, byte cap, cancellation.
+   * @returns the pull-request detail (body capped at maxBytes and flagged).
+   */
+  async getPull(options: {
+    readonly project?: string
+    readonly number: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<GitHubEntryDetail> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.get<RawDetail>(
+      `/repos/${owner}/${repo}/pulls/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapDetail(raw, options.maxBytes, true)
   }
 
   /**
@@ -599,6 +660,31 @@ function mapEntry(entry: RawEntry): GitHubEntry {
     state: entry.state,
     webUrl: entry.html_url,
     authorName: entry.user?.login ?? 'unknown',
+  }
+}
+
+/** Map one raw detail payload; `pull` adds the branch pair and the draft flag. */
+function mapDetail(detail: RawDetail, maxBytes: number, pull: boolean): GitHubEntryDetail {
+  const body = detail.body ?? ''
+  const truncated = body.length > maxBytes
+  return {
+    number: detail.number,
+    title: detail.title,
+    state: detail.state,
+    webUrl: detail.html_url,
+    authorName: detail.user?.login ?? 'unknown',
+    body: truncated ? body.slice(0, maxBytes) : body,
+    labels: detail.labels.map(label => label.name),
+    createdAt: detail.created_at,
+    updatedAt: detail.updated_at,
+    bodyTruncated: truncated,
+    ...pull
+      ? {
+        sourceBranch: detail.head?.ref ?? '',
+        targetBranch: detail.base?.ref ?? '',
+        draft: detail.draft ?? false,
+      }
+      : {},
   }
 }
 

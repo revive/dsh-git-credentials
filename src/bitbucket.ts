@@ -29,6 +29,18 @@ export interface BitbucketEntry {
   readonly authorName: string
 }
 
+/** One issue or pull request read in full (action "get"). */
+export interface BitbucketEntryDetail extends BitbucketEntry {
+  readonly body: string
+  readonly labels: string[]
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly bodyTruncated: boolean
+  readonly sourceBranch?: string
+  readonly targetBranch?: string
+  readonly draft?: boolean
+}
+
 /** A repository file read through the Bitbucket API. */
 export interface BitbucketFile {
   readonly path: string
@@ -73,6 +85,22 @@ interface RawPull {
   readonly state: string
   readonly links: { readonly html: { readonly href: string } }
   readonly author: { readonly display_name: string } | null
+}
+
+/** Raw issue detail (2.0 adds the description body and timestamps). */
+interface RawIssueDetail extends RawIssue {
+  readonly content: { readonly raw: string } | null
+  readonly created_on: string
+  readonly updated_on: string
+}
+
+/** Raw pull-request detail (2.0 adds the description, branch pair, and timestamps). */
+interface RawPullDetail extends RawPull {
+  readonly description: string | null
+  readonly created_on: string
+  readonly updated_on: string
+  readonly source: { readonly branch: { readonly name: string } }
+  readonly destination: { readonly branch: { readonly name: string } }
 }
 
 /** Split `workspace/repo` into two path segments; fails loud on a malformed argument. */
@@ -241,6 +269,44 @@ export class BitbucketClient {
       webUrl: pull.links.html.href,
       authorName: pull.author?.display_name ?? 'unknown',
     }))
+  }
+
+  /**
+   * Read one issue in full (action "get"): description body and timestamps.
+   * @param options - project (site default when omitted), issue id, byte cap, cancellation.
+   * @returns the issue detail (body capped at maxBytes and flagged).
+   */
+  async getIssue(options: {
+    readonly project?: string
+    readonly number: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<BitbucketEntryDetail> {
+    const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.get<RawIssueDetail>(
+      `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/issues/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapIssueDetail(raw, options.maxBytes)
+  }
+
+  /**
+   * Read one pull request in full (action "get"): description, branch pair, timestamps.
+   * @param options - project (site default when omitted), PR id, byte cap, cancellation.
+   * @returns the pull-request detail (body capped at maxBytes and flagged).
+   */
+  async getPull(options: {
+    readonly project?: string
+    readonly number: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<BitbucketEntryDetail> {
+    const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.get<RawPullDetail>(
+      `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/pullrequests/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    return mapPullDetail(raw, options.maxBytes)
   }
 
   /**
@@ -539,5 +605,44 @@ function mapPull(pull: RawPull): BitbucketEntry {
     state: pull.state,
     webUrl: pull.links.html.href,
     authorName: pull.author?.display_name ?? 'unknown',
+  }
+}
+
+/** Map one raw issue detail; 2.0 issues carry no labels. */
+function mapIssueDetail(detail: RawIssueDetail, maxBytes: number): BitbucketEntryDetail {
+  const body = detail.content?.raw ?? ''
+  const truncated = body.length > maxBytes
+  return {
+    number: detail.id,
+    title: detail.title,
+    state: detail.state,
+    webUrl: detail.links.html.href,
+    authorName: detail.reporter?.display_name ?? 'unknown',
+    body: truncated ? body.slice(0, maxBytes) : body,
+    labels: [],
+    createdAt: detail.created_on,
+    updatedAt: detail.updated_on,
+    bodyTruncated: truncated,
+  }
+}
+
+/** Map one raw pull-request detail; 2.0 pull requests carry no draft state. */
+function mapPullDetail(detail: RawPullDetail, maxBytes: number): BitbucketEntryDetail {
+  const body = detail.description ?? ''
+  const truncated = body.length > maxBytes
+  return {
+    number: detail.id,
+    title: detail.title,
+    state: detail.state,
+    webUrl: detail.links.html.href,
+    authorName: detail.author?.display_name ?? 'unknown',
+    body: truncated ? body.slice(0, maxBytes) : body,
+    labels: [],
+    createdAt: detail.created_on,
+    updatedAt: detail.updated_on,
+    bodyTruncated: truncated,
+    sourceBranch: detail.source.branch.name,
+    targetBranch: detail.destination.branch.name,
+    draft: false,
   }
 }

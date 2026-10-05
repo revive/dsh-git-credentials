@@ -65,7 +65,24 @@ const repoSchema = {
   additionalProperties: false,
 } as const
 
-/** Canonical shape of one GitLab merge-request or issue summary (iid-keyed). */
+/** Detail fields an action "get" read adds to one issue (all providers). */
+const issueDetailProperties = {
+  body: { type: 'string' },
+  labels: { type: 'array', items: { type: 'string' } },
+  createdAt: { type: 'string' },
+  updatedAt: { type: 'string' },
+  bodyTruncated: { type: 'boolean' },
+} as const
+
+/** Detail fields an action "get" read adds to one merge/pull request (branch pair + draft). */
+const pullDetailProperties = {
+  ...issueDetailProperties,
+  sourceBranch: { type: 'string' },
+  targetBranch: { type: 'string' },
+  draft: { type: 'boolean' },
+} as const
+
+/** Canonical shape of one GitLab issue entry (iid-keyed): list summary plus the "get" fields. */
 const listEntrySchema = {
   type: 'object',
   properties: {
@@ -74,11 +91,26 @@ const listEntrySchema = {
     state: { type: 'string' },
     webUrl: { type: 'string' },
     authorName: { type: 'string' },
+    ...issueDetailProperties,
   },
   additionalProperties: false,
 } as const
 
-/** Canonical shape of one GitHub / Gitee / Gitea / Bitbucket issue or PR summary (number-keyed). */
+/** Canonical shape of one GitLab merge-request entry (iid-keyed). */
+const listPullSchema = {
+  type: 'object',
+  properties: {
+    iid: { type: 'integer' },
+    title: { type: 'string' },
+    state: { type: 'string' },
+    webUrl: { type: 'string' },
+    authorName: { type: 'string' },
+    ...pullDetailProperties,
+  },
+  additionalProperties: false,
+} as const
+
+/** Canonical shape of one GitHub / Gitee / Gitea / Bitbucket issue entry (number-keyed). */
 const githubEntrySchema = {
   type: 'object',
   properties: {
@@ -87,6 +119,21 @@ const githubEntrySchema = {
     state: { type: 'string' },
     webUrl: { type: 'string' },
     authorName: { type: 'string' },
+    ...issueDetailProperties,
+  },
+  additionalProperties: false,
+} as const
+
+/** Canonical shape of one GitHub / Gitee / Gitea / Bitbucket pull-request entry (number-keyed). */
+const githubPullSchema = {
+  type: 'object',
+  properties: {
+    number: { type: 'integer' },
+    title: { type: 'string' },
+    state: { type: 'string' },
+    webUrl: { type: 'string' },
+    authorName: { type: 'string' },
+    ...pullDetailProperties,
   },
   additionalProperties: false,
 } as const
@@ -125,6 +172,22 @@ interface IterationEntry {
   readonly state: string
   readonly webUrl: string
   readonly authorName: string
+}
+
+/**
+ * One issue/MR/PR read by action "get": the list fields plus the description
+ * (capped, with an explicit truncation flag), labels, and timestamps; merge
+ * and pull requests add the branch pair and the draft flag.
+ */
+interface EntryDetail extends IterationEntry {
+  readonly body: string
+  readonly labels: string[]
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly bodyTruncated: boolean
+  readonly sourceBranch?: string
+  readonly targetBranch?: string
+  readonly draft?: boolean
 }
 
 /** One release as the loop sees it (id absent on GitLab, which keys releases by tag). */
@@ -232,6 +295,40 @@ export function apply(ctx: Context, config: PluginConfig): void {
       }
     }
 
+  /** Render one action "get" read: the entry's metadata line and its description. */
+  const renderEntryDetail = (label: string) =>
+    (_args: { action?: string }, entries: EntryDetail[]): Array<{ type: 'text'; text: string }> => {
+      const entry = entries[0]
+      if (entry === undefined) return [{ type: 'text', text: `No ${label} found.` }]
+      const facts = [
+        entry.authorName,
+        ...entry.sourceBranch === undefined || entry.targetBranch === undefined
+          ? []
+          : [`${entry.sourceBranch} → ${entry.targetBranch}`],
+        ...entry.draft === true ? ['draft'] : [],
+        ...entry.labels.length === 0 ? [] : [`labels: ${entry.labels.join(', ')}`],
+        ...entry.createdAt === '' ? [] : [`created ${entry.createdAt}`],
+        ...entry.updatedAt === '' ? [] : [`updated ${entry.updatedAt}`],
+        entry.webUrl,
+      ]
+      const blocks: Array<{ type: 'text'; text: string }> = [
+        { type: 'text', text: `#${entryId(entry)} [${entry.state}] ${entry.title}` },
+        { type: 'text', text: facts.join(' — ') },
+        { type: 'text', text: entry.body.trim() === '' ? '(no description)' : entry.body },
+      ]
+      if (entry.bodyTruncated) {
+        blocks.push({ type: 'text', text: `(description truncated — full text at ${entry.webUrl})` })
+      }
+      return blocks
+    }
+
+  /** Render one issues/pulls result: "get" renders the detail block, every other action its own line. */
+  const renderEntryResult = (label: string, plural: string) =>
+    (args: { action?: string }, entries: EntryDetail[]): Array<{ type: 'text'; text: string }> =>
+      (args.action ?? 'list') === 'get'
+        ? renderEntryDetail(label)(args, entries)
+        : renderEntryAction(label, plural)(args, entries)
+
   /** Render one repos/projects action result. */
   const renderRepoAction = (args: { action?: string }, repos: IterationRepo[]): Array<{ type: 'text'; text: string }> => {
     if (args.action === 'create') {
@@ -294,6 +391,18 @@ export function apply(ctx: Context, config: PluginConfig): void {
       readonly perPage?: number
       readonly signal?: AbortSignal
     }): Promise<IterationEntry[]>
+    getIssue(options: {
+      readonly project?: string
+      readonly number: number
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    }): Promise<EntryDetail>
+    getPull(options: {
+      readonly project?: string
+      readonly number: number
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    }): Promise<EntryDetail>
     createRepo(options: {
       readonly name: string
       readonly description?: string
@@ -351,8 +460,10 @@ export function apply(ctx: Context, config: PluginConfig): void {
     readonly reposKind: string
     /** The pull-request tool's kind name: "merge_requests" (GitLab) or "pull_requests" (others). */
     readonly pullsKind: string
-    /** Which entry schema the provider's issues/PR tools emit. */
+    /** Which entry schema the provider's issues tool emits (list summary + "get" detail). */
     readonly entrySchema: typeof listEntrySchema | typeof githubEntrySchema
+    /** Which entry schema the provider's merge/pull-request tool emits (adds the branch pair). */
+    readonly pullSchema: typeof listPullSchema | typeof githubPullSchema
     /** The default list state name ("opened" on GitLab, "open" elsewhere). */
     readonly defaultState: string
     /** GitLab: membership filter on project listing + path/visibility on create. */
@@ -468,11 +579,11 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
     ctx.tools.register(defineTool({
       name: named('issues'),
-      description: `List, create, or modify ${label} issues. action: "list" (project?, state?, perPage?), "create" (title, body?), "close" (number), "reopen" (number), "comment" (number, body) — the token is injected per site.${SITE_DESCRIPTION}`,
+      description: `List, read, create, or modify ${label} issues. action: "list" (project?, state?, perPage?), "get" (number — one issue with its description, labels, and dates), "create" (title, body?), "close" (number), "reopen" (number), "comment" (number, body) — the token is injected per site.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
         action: {
-          type: 'string', enum: ['list', 'create', 'close', 'reopen', 'comment'],
+          type: 'string', enum: ['list', 'get', 'create', 'close', 'reopen', 'comment'],
           description: 'What to do; defaults to "list".',
         },
         project: {
@@ -484,19 +595,27 @@ export function apply(ctx: Context, config: PluginConfig): void {
           description: `Filter by state (${spec.defaultState === 'opened' ? 'opened/closed/all' : 'open/closed/all'}); only for action "list".`,
         },
         perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
-        number: { type: 'integer', description: 'Issue number (required for close/reopen/comment).' },
+        number: { type: 'integer', description: 'Issue number (required for get/close/reopen/comment).' },
         title: { type: 'string', description: 'Issue title (required for create).' },
         body: { type: 'string', description: 'Issue body or comment text (Markdown).' },
       },
       output: {
         schema: { type: 'array', items: spec.entrySchema },
-        render: renderEntryAction('issue', 'issues'),
+        render: renderEntryResult('issue', 'issues'),
       },
       presentCall(args): GenericCallView {
+        const action = args.action ?? 'list'
+        if (action === 'get') {
+          return {
+            card: 'generic',
+            title: `Read issue #${args.number ?? '?'} in ${args.project ?? 'default project'}`,
+            kind: 'read',
+          }
+        }
         return {
           card: 'generic',
-          title: `${(args.action ?? 'list') === 'list' ? 'Issues of' : 'Issue operation on'} ${args.project ?? 'default project'}`,
-          kind: (args.action ?? 'list') === 'list' ? 'search' : 'edit',
+          title: `${action === 'list' ? 'Issues of' : 'Issue operation on'} ${args.project ?? 'default project'}`,
+          kind: action === 'list' ? 'search' : 'edit',
         }
       },
       async execute(args, exec) {
@@ -504,6 +623,13 @@ export function apply(ctx: Context, config: PluginConfig): void {
         switch (args.action ?? 'list') {
           case 'list':
             return c.listIssues({ ...(args.project === undefined ? {} : { project: args.project }), ...(args.state === undefined ? {} : { state: args.state }), ...(args.perPage === undefined ? {} : { perPage: args.perPage }), signal: exec.signal })
+          case 'get':
+            return [await c.getIssue({
+              ...(args.project === undefined ? {} : { project: args.project }),
+              number: needNumber(args, named('issues')),
+              maxBytes: config.fileReadMaxBytes,
+              signal: exec.signal,
+            })]
           case 'create':
             return [await c.createIssue({
               ...(args.project === undefined ? {} : { project: args.project }),
@@ -523,20 +649,22 @@ export function apply(ctx: Context, config: PluginConfig): void {
               signal: exec.signal,
             })]
           default:
-            throw new Error(`${named('issues')}: unknown action ${JSON.stringify(args.action)}; valid: list, create, close, reopen, comment`)
+            throw new Error(`${named('issues')}: unknown action ${JSON.stringify(args.action)}; valid: list, get, create, close, reopen, comment`)
         }
       },
     }))
 
     ctx.tools.register(defineTool({
       name: named(pullsKind),
-      description: `List, create, or modify ${label} ${pullsKind === 'merge_requests'
+      description: `List, read, create, or modify ${label} ${pullsKind === 'merge_requests'
         ? 'merge requests'
-        : 'pull requests'}. action: "list" (project?, state?, perPage?), "create" (title, head/sourceBranch, base/targetBranch, body?), "merge" (number), "close" (number) — the token is injected per site.${SITE_DESCRIPTION}`,
+        : 'pull requests'}. action: "list" (project?, state?, perPage?), "get" (number — one ${pullsKind === 'merge_requests'
+        ? 'merge request'
+        : 'pull request'} with its description, branches, labels, and dates), "create" (title, head/sourceBranch, base/targetBranch, body?), "merge" (number), "close" (number) — the token is injected per site.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
         action: {
-          type: 'string', enum: ['list', 'create', 'merge', 'close'],
+          type: 'string', enum: ['list', 'get', 'create', 'merge', 'close'],
           description: 'What to do; defaults to "list".',
         },
         project: {
@@ -548,7 +676,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
           description: `Filter by state (${spec.defaultState === 'opened' ? 'opened/closed/all/merged' : 'open/closed/all'}); only for action "list".`,
         },
         perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
-        number: { type: 'integer', description: 'PR/MR number (required for merge/close).' },
+        number: { type: 'integer', description: 'PR/MR number (required for get/merge/close).' },
         title: { type: 'string', description: 'PR/MR title (required for create).' },
         ...(spec.gitlabExtras === true
           ? {
@@ -562,14 +690,25 @@ export function apply(ctx: Context, config: PluginConfig): void {
         body: { type: 'string', description: 'PR/MR description (Markdown).' },
       },
       output: {
-        schema: { type: 'array', items: spec.entrySchema },
-        render: renderEntryAction(pullsKind === 'merge_requests' ? 'merge request' : 'pull request', pullsKind === 'merge_requests' ? 'merge requests' : 'pull requests'),
+        schema: { type: 'array', items: spec.pullSchema },
+        render: renderEntryResult(
+          pullsKind === 'merge_requests' ? 'merge request' : 'pull request',
+          pullsKind === 'merge_requests' ? 'merge requests' : 'pull requests',
+        ),
       },
       presentCall(args): GenericCallView {
+        const action = args.action ?? 'list'
+        if (action === 'get') {
+          return {
+            card: 'generic',
+            title: `Read ${pullsKind === 'merge_requests' ? 'merge request' : 'pull request'} #${args.number ?? '?'} in ${args.project ?? 'default project'}`,
+            kind: 'read',
+          }
+        }
         return {
           card: 'generic',
-          title: `${(args.action ?? 'list') === 'list' ? 'Pull requests of' : 'Pull-request operation on'} ${args.project ?? 'default project'}`,
-          kind: (args.action ?? 'list') === 'list' ? 'search' : 'edit',
+          title: `${action === 'list' ? 'Pull requests of' : 'Pull-request operation on'} ${args.project ?? 'default project'}`,
+          kind: action === 'list' ? 'search' : 'edit',
         }
       },
       async execute(args, exec) {
@@ -577,6 +716,13 @@ export function apply(ctx: Context, config: PluginConfig): void {
         switch (args.action ?? 'list') {
           case 'list':
             return c.listPullRequests({ ...(args.project === undefined ? {} : { project: args.project }), ...(args.state === undefined ? {} : { state: args.state }), ...(args.perPage === undefined ? {} : { perPage: args.perPage }), signal: exec.signal })
+          case 'get':
+            return [await c.getPull({
+              ...(args.project === undefined ? {} : { project: args.project }),
+              number: needNumber(args, named(pullsKind)),
+              maxBytes: config.fileReadMaxBytes,
+              signal: exec.signal,
+            })]
           case 'create': {
             // GitLab spells the branches sourceBranch/targetBranch; the others use head/base.
             const branches = spec.gitlabExtras === true
@@ -602,7 +748,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
           case 'close':
             return [await c.closePull({ ...(args.project === undefined ? {} : { project: args.project }), number: needNumber(args, named(pullsKind)), signal: exec.signal })]
           default:
-            throw new Error(`${named(pullsKind)}: unknown action ${JSON.stringify(args.action)}; valid: list, create, merge, close`)
+            throw new Error(`${named(pullsKind)}: unknown action ${JSON.stringify(args.action)}; valid: list, get, create, merge, close`)
         }
       },
     }))
@@ -691,6 +837,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
     reposKind: 'projects',
     pullsKind: 'merge_requests',
     entrySchema: listEntrySchema,
+    pullSchema: listPullSchema,
     defaultState: 'opened',
     gitlabExtras: true,
   })
@@ -702,6 +849,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
     reposKind: 'repos',
     pullsKind: 'pull_requests',
     entrySchema: githubEntrySchema,
+    pullSchema: githubPullSchema,
     defaultState: 'open',
   })
   registerForgeTools({
@@ -712,6 +860,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
     reposKind: 'repos',
     pullsKind: 'pull_requests',
     entrySchema: githubEntrySchema,
+    pullSchema: githubPullSchema,
     defaultState: 'open',
   })
   registerForgeTools({
@@ -722,6 +871,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
     reposKind: 'repos',
     pullsKind: 'pull_requests',
     entrySchema: githubEntrySchema,
+    pullSchema: githubPullSchema,
     defaultState: 'open',
   })
   registerForgeTools({
@@ -732,6 +882,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
     reposKind: 'repos',
     pullsKind: 'pull_requests',
     entrySchema: githubEntrySchema,
+    pullSchema: githubPullSchema,
     defaultState: 'open',
     releases: false,
   })
