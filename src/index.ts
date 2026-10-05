@@ -295,7 +295,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
       }
     }
 
-  /** Render one action "get" read: the entry's metadata line and its description. */
+  /** Render one action "get" read: one block, so the result pipeline keeps the lines apart. */
   const renderEntryDetail = (label: string) =>
     (_args: { action?: string }, entries: EntryDetail[]): Array<{ type: 'text'; text: string }> => {
       const entry = entries[0]
@@ -311,15 +311,15 @@ export function apply(ctx: Context, config: PluginConfig): void {
         ...entry.updatedAt === '' ? [] : [`updated ${entry.updatedAt}`],
         entry.webUrl,
       ]
-      const blocks: Array<{ type: 'text'; text: string }> = [
-        { type: 'text', text: `#${entryId(entry)} [${entry.state}] ${entry.title}` },
-        { type: 'text', text: facts.join(' — ') },
-        { type: 'text', text: entry.body.trim() === '' ? '(no description)' : entry.body },
+      const lines = [
+        `#${entryId(entry)} [${entry.state}] ${entry.title}`,
+        facts.join(' — '),
+        entry.body.trim() === '' ? '(no description)' : entry.body,
       ]
       if (entry.bodyTruncated) {
-        blocks.push({ type: 'text', text: `(description truncated — full text at ${entry.webUrl})` })
+        lines.push(`(description truncated — full text at ${entry.webUrl})`)
       }
-      return blocks
+      return [{ type: 'text', text: lines.join('\n') }]
     }
 
   /** Render one issues/pulls result: "get" renders the detail block, every other action its own line. */

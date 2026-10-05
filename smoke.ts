@@ -42,6 +42,11 @@ interface ToolRegistry {
     readonly parameters?: {
       readonly properties?: { readonly action?: { readonly enum?: readonly string[] } }
     }
+    /** The output contract's model-facing projection (rendered for the get layout check). */
+    readonly output?: {
+      readonly render?: (args: unknown, value: unknown) =>
+        ReadonlyArray<{ readonly type: string; readonly text: string }>
+    }
   } | undefined
 }
 
@@ -125,6 +130,39 @@ try {
       throw new Error(`tool ${name} does not expose the "get" action (enum: ${JSON.stringify(actions)})`)
     }
     console.log(`ok: ${name} exposes the get action`)
+  }
+
+  // The get read must render as ONE newline-separated block: the result
+  // pipeline concatenates separate content blocks without a separator, which
+  // ran the title into the author line before.
+  {
+    const detail = {
+      number: 7,
+      title: 'Sample issue',
+      state: 'open',
+      webUrl: 'https://example.test/i/7',
+      authorName: 'octocat',
+      body: 'First line\nSecond line',
+      labels: ['bug', 'docs'],
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-02T00:00:00Z',
+      bodyTruncated: true,
+    }
+    const rendered = tools.get('github_issues')?.output?.render?.({ action: 'get' }, [detail]) ?? []
+    if (rendered.length !== 1) {
+      throw new Error(`the get renderer must emit one content block, got ${rendered.length}`)
+    }
+    const expected = [
+      '#7 [open] Sample issue',
+      'octocat — labels: bug, docs — created 2026-01-01T00:00:00Z — updated 2026-01-02T00:00:00Z — https://example.test/i/7',
+      'First line',
+      'Second line',
+      '(description truncated — full text at https://example.test/i/7)',
+    ].join('\n')
+    if (rendered[0]?.text !== expected) {
+      throw new Error(`unexpected get rendering:\n${JSON.stringify(rendered[0]?.text)}\nexpected:\n${JSON.stringify(expected)}`)
+    }
+    console.log('ok: the get renderer emits one newline-separated block')
   }
 
   // The forge surface contract: every client must expose every method the
