@@ -211,6 +211,7 @@ git-credentials/
   src/admin.ts            # /git-credentials-admin/* 管理端点
   src/client/             # browser half：设置页 Git 凭据分区
   lib/                    # 构建产物（node 半 + client bundle，已 gitignore）
+  CHANGELOG.md            # 逐版本变更；每次 release body 的来源
 ```
 
 ## 发布
@@ -239,6 +240,10 @@ git-credentials/
   ```sh
   dsh plugin --profile <name> add ./dsh-git-credentials-<version>.tgz
   ```
+
+**Release notes 来自 `CHANGELOG.md`。** 推送 `v*` tag 时，CI 会取该文件里对应版本段落的正文作为 release body，并追加统一的安装 footer（`.github/scripts/compose-release-notes.sh`）；某版本没有段落时回退到 GitHub 自动生成的 notes，因此不会因为漏写 changelog 卡住发布。打 tag 之前，请在版本号提交里把 `[Unreleased]` 的内容移入 `## [<version>] - <日期>` 段落，这样 tag 指向的树里就带着这份 notes。想本地预览某个版本的正文：`bash .github/scripts/compose-release-notes.sh <version>`。
+
+要重算**已经发布**的 release 的 notes（例如补齐早于这套流程的版本），手动运行 `release` workflow 并填 `version` 输入即可：它从默认分支读取 `CHANGELOG.md`、只重写 release body，不动已附带的 tarball 资产。
 
 对外公布前先在本地验证产物：`dsh plugin --profile <name> add <tarball|包名>`，确认 `dsh --profile <name> --dump-config` 出现 `# == dsh-git-credentials` 层，再 boot profile 检查 24 个工具是否注册。
 

@@ -3,6 +3,14 @@ name: release
 # Build the tarball in the cloud and attach it to a GitHub Release whenever a
 # v* tag is pushed (e.g. `git tag v<version> && git push origin v<version>`).
 #
+# The release body is composed from CHANGELOG.md's section for that version,
+# with the standard install footer appended (see
+# .github/scripts/compose-release-notes.sh). A version whose section is missing
+# falls back to GitHub's generated notes, so a release never blocks on a
+# changelog omission. The same composition is exposed as a manual workflow that
+# re-writes the notes of an already published release while leaving its tarball
+# asset untouched.
+#
 # The build is self-contained: `pnpm build` (tsdown) compiles the node half and
 # the browser bundle from source with no deepseek-harness checkout needed.
 # Typecheck and the smoke test require a harness checkout and are intentionally
@@ -11,16 +19,26 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version whose release notes to (re)compose, e.g. 0.4.0'
+        required: true
 
 permissions:
   contents: write
 
 jobs:
   pack:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history and tags: the generated-notes fallback resolves the
+          # previous tag with `git describe`.
+          fetch-depth: 0
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
@@ -45,6 +63,11 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_ENV"
 
+      - name: Compose release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/compose-release-notes.sh "${{ env.version }}" > /tmp/notes.md
+
       - name: Build node half + browser bundle
         run: pnpm build
 
@@ -58,8 +81,29 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           TGZ="dsh-git-credentials-${{ env.version }}.tgz"
           # The release may already exist (e.g. created via the plugin's
-          # github_releases tool) — attach the asset to it in that case.
-          gh release create "$TAG" \
+          # github_releases tool) — update its body and keep the asset upload.
+          if ! gh release create "$TAG" \
             --title "dsh-git-credentials ${{ env.version }}" \
-            --notes "Automated build from GitHub Actions: node half + browser bundle packed into \`$TGZ\`. Install with \`dsh plugin --profile <name> add ./$TGZ\` and restart the GUI." >/dev/null 2>&1 || true
+            --notes-file /tmp/notes.md; then
+            gh release edit "$TAG" \
+              --title "dsh-git-credentials ${{ env.version }}" \
+              --notes-file /tmp/notes.md
+          fi
           gh release upload "$TAG" "$TGZ" --clobber
+
+  notes:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+
+      - name: Compose release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/compose-release-notes.sh "${{ inputs.version }}" > /tmp/notes.md
+
+      - name: Update the release body
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "v${{ inputs.version }}" --notes-file /tmp/notes.md

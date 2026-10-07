@@ -212,6 +212,7 @@ git-credentials/
   src/admin.ts            # /git-credentials-admin/* management endpoints
   src/client/             # browser half: the Settings → Git Credentials panel
   lib/                    # build output (node half + client bundle, gitignored)
+  CHANGELOG.md            # per-version changes; the source of each release body
 ```
 
 ## Publishing
@@ -240,6 +241,10 @@ Two channels carry the same packed artifact:
   ```sh
   dsh plugin --profile <name> add ./dsh-git-credentials-<version>.tgz
   ```
+
+**Release notes come from `CHANGELOG.md`.** Pushing a `v*` tag composes the release body from that file's section for the tag's version and appends the standard install footer (`.github/scripts/compose-release-notes.sh`); a version without a section falls back to GitHub's generated notes, so a release never blocks on a changelog omission. Before tagging, move the `[Unreleased]` items into a `## [<version>] - <date>` section in the version-bump commit, so the tagged tree carries the notes. Preview one body locally with `bash .github/scripts/compose-release-notes.sh <version>`.
+
+To (re)compose the notes of a release that is already published — for example to backfill one that predates this pipeline — run the `release` workflow manually with its `version` input: it reads `CHANGELOG.md` from the default branch, rewrites the release body, and leaves the attached tarball untouched.
 
 Verify the artifact locally before announcing it — `dsh plugin --profile <name> add <tarball|package>`, confirm `dsh --profile <name> --dump-config` shows the `# == dsh-git-credentials` layer, then boot the profile and check the 24 tools register.
 
