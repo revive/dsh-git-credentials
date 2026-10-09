@@ -10,43 +10,30 @@ to users as the release notes.
 
 ## [Unreleased]
 
-## [0.6.0] - 2026-10-09
-
-### Added
-
-- The Settings panel follows the Harness UI language: its copy and its navigation label are
-  registered in Chinese and English through the client locale service, and the panel reads them
-  through the locale-bound `t` its section registration declares.
-
-### Changed
-
-- A site owns exactly one token. The token reference name is gone from the store, the admin API,
-  the tools, and the panel: saving a site and its token is one request, rotating a token is the same
-  save, and deleting a site deletes its token, so a credential can neither outlive its site nor be
-  shared by accident. A store written by an earlier version is migrated on read — each site's
-  referenced value becomes its own token, and reference keys that no site referenced are dropped.
-- Field hints state the rule and nothing more (site id charset, API root, token optionality), and the
-  token reference field and its hint are gone with the model change.
-
 ## [0.5.0] - 2026-10-09
 
 ### Added
 
-- The Settings panel separates configured sites from the add form: the configured list is a card
+- The Settings panel is rebuilt around two clearly separated areas: the configured sites are a card
   list with per-site facts and row actions, and the add form is its own card with one save button.
+- The panel follows the Harness UI language: its copy and its navigation label are registered in
+  Chinese and English through the client locale service, and the panel reads them through the
+  locale-bound `t` its section registration declares.
 - Sites can be configured for every provider the tools support. The admin site write only accepted
-  `gitlab` and `github`, so Gitee, Gitea, and Bitbucket sites were rejected with HTTP 400 even
-  though the store and the tool layer support them. The write now accepts all five providers and
-  defaults each provider's token reference name.
+  `gitlab` and `github`, so Gitee, Gitea, and Bitbucket sites were rejected with HTTP 400 even though
+  the store and the tool layer support them; the write now accepts all five providers.
 
 ### Changed
 
-- One write saves a site and its token together: the separate "save token" button is gone from both
-  the add form and the edit card, so a token can no longer be stored for a site that does not exist
-  yet. Clearing a token stays its own action, next to the token field.
-- Field rules are stated before a write. The site id and token reference rules appear as field help,
-  an invalid draft explains itself in prose instead of a regular expression and disables save, and a
-  provider switch only replaces values the user has not typed.
+- A site owns exactly one token. The token reference name is gone from the store, the admin API, the
+  tools, and the panel: saving a site and its token is one request, rotating a token is the same
+  save, and deleting a site deletes its token, so a credential can neither outlive its site nor be
+  shared by accident. A store written by an earlier version is migrated on read — each site's
+  referenced value becomes its own token, and reference keys that no site referenced are dropped.
+- Field rules are stated before a write, and only as the rule itself: the site id charset and the
+  http(s) API root appear as short field help, an invalid draft explains itself in prose instead of a
+  regular expression and disables save, and a provider switch only replaces values the user has not
+  typed.
 - Panel styling draws on the Host pages beside it: it copies their control metrics, focus behavior,
   and list rhythm, and the only thing shared with the Host is the `--dsw-*` theme tokens. The
   previous hardcoded colors are gone, so the panel follows light and dark themes.
