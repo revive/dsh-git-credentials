@@ -94,8 +94,8 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 
 在 **设置 → Git 凭据** 中管理站点与 token：
 
-- **添加站点**：provider（GitLab / GitHub / Gitee / Gitea / Bitbucket）、站点 id、API 地址（各 provider 默认值：`https://api.github.com`、`https://gitee.com/api/v5`、`https://api.bitbucket.org/2.0`；GitLab 与 Gitea 是自托管，需自己填地址，如 `https://gitlab.example.com` / `https://gitea.example.com/api/v1`）、token 引用名（默认 `GITLAB_TOKEN` / `GITHUB_TOKEN` / `GITEE_TOKEN` / `GITEA_TOKEN` / `BITBUCKET_TOKEN`）、token 值（可选，可用专属的「保存 Token」按钮单独写入，也可随「添加站点」一并写入）、默认项目（可选）
-- **每个已保存的站点**：默认只读展示（provider、地址、tokenRef、默认项目、token 配置状态），点「编辑」才显示文本框与「保存 / 取消」；编辑态可改配置、单独保存或清除 token 值、删除站点
+- **添加站点**：表单在列表下方独立的「新增站点」卡片里，含站点 id、provider（GitLab / GitHub / Gitee / Gitea / Bitbucket）、API 地址（各 provider 默认值：`https://api.github.com`、`https://gitee.com/api/v5`、`https://api.bitbucket.org/2.0`；GitLab 与 Gitea 是自托管，需自己填地址，如 `https://gitlab.example.com` / `https://gitea.example.com/api/v1`）、token 引用名（默认 `GITLAB_TOKEN` / `GITHUB_TOKEN` / `GITEE_TOKEN` / `GITEA_TOKEN` / `BITBUCKET_TOKEN`）、token 值（可选）与默认项目（可选）。一个「保存」把站点与 token 一起写入；各字段规则（站点 id 字符集、token 引用名字符集、http(s) 地址）作为字段说明直接写在输入框下方，草稿不合法时用中文说明问题并禁用「保存」，不必等服务器报错
+- **每个已保存的站点**：默认在自己的卡片里只读展示（provider、地址、token 引用名、默认项目、token 配置状态），操作为「编辑」与「删除站点」；编辑态显示各输入框及「保存 / 取消」，一次保存同时提交字段与新填的 token 值，清除 token 则用 token 字段旁的「清除 Token」
 - 面板通过同源 `/git-credentials-admin/*` JSON 端点读写加密存储；任何响应都不携带 token 值
 - 所有改动即时生效——每次工具调用读一份解密快照
 
@@ -153,6 +153,8 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 前置条件：一份 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 检出。开发工具链由 harness 提供：把 `DSH_REPO` 指向检出目录，并将其 `node_modules/.bin` 加入 `PATH`（`@deepseek-ai/*` 为私有包，通过 harness 的 tsconfig paths 解析）。
 
 浏览器半边面向当前的客户端 slot 标准：面板是 `settings.section` 列表项，组件接收组合后的 section props；typecheck 程序通过 type-only import 引入 slot 契约。请针对实际运行的检出做类型检查——切换 harness 版本后重新生成 `tsconfig.json`。尚未构建客户端 face 的检出会回退到这些包的源码；如果报错指向 `packages/.../src`，先在检出里跑 `pnpm run build:lib:client` 构建该 face，再重新检查。
+
+**面板自带控件实现。** `src/client/panel-css.ts` 把面板旁边那些宿主页面的控件尺寸、focus 行为与列表节奏抄进插件（类名统一加 `dshgc-` 前缀），与宿主共享的只有 `--dsw-*` 主题 token，因此浅色/深色自动跟随。**刻意不以模块方式 import** `@deepseek-ai/dsh-client-ui-primitives` 等 Harness Client 包：它们会无预警地变动，而组件抛错会让整个 slot 条目变空白。`dsh.client.inject` 只用于排序激活，仍然允许。
 
 **harness 兼容性由 manifest 强制把关。** DSH 会读取本包的 `peerDependencies` 中所有 `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh-*` 声明，只要有一个 range 不匹配当前运行的 harness 版本（含预发布版），就拒绝应用该 bundle 层：被拒的 bundle 不贡献任何工具与设置页，harness 会报告被拒的 peer。`@deepseek-ai/dsh-tools` 的 range 有意放宽为 `>=0.1.7-rc.1 <1.0.0`，使 0.x 线内的 harness 升级本身不会导致 bundle 被拒（harness 各包与产品版本同步发布）。因此遇到新 harness 版本时的流程是：重新生成 `tsconfig.json`、跑 `pnpm typecheck` 与 `pnpm smoke`；只有当这些真的失败时才动 range，并把 `<1.0.0` 当作重新验证的边界。不安装也能校验——这个检查只读 manifest：
 

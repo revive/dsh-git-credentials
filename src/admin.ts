@@ -41,6 +41,18 @@ const ADMIN_PREFIX = '/git-credentials-admin'
 /** The site id pattern. */
 const SITE_ID_PATTERN = /^[a-z][a-z0-9-]*$/
 
+/** Every provider the store and the tool layer support, in picker order. */
+const PROVIDERS: readonly ForgeProvider[] = ['gitlab', 'github', 'gitee', 'gitea', 'bitbucket']
+
+/** Provider → the token reference name a site defaults to. */
+const DEFAULT_TOKEN_REFS: Record<ForgeProvider, string> = {
+  gitlab: 'GITLAB_TOKEN',
+  github: 'GITHUB_TOKEN',
+  gitee: 'GITEE_TOKEN',
+  gitea: 'GITEA_TOKEN',
+  bitbucket: 'BITBUCKET_TOKEN',
+}
+
 /**
  * Register the management routes; a no-op where no webserver exists.
  * @param ctx - plugin context (web composition only reaches this branch).
@@ -99,13 +111,16 @@ function parseSite(body: unknown): ParsedSite | string {
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') return 'site.baseUrl must be http(s)'
   const providerRaw = fields.provider
-  let provider: ForgeProvider
-  if (providerRaw === undefined) provider = 'gitlab'
-  else if (providerRaw === 'gitlab' || providerRaw === 'github') provider = providerRaw
-  else return `site.provider must be "gitlab" or "github", got ${JSON.stringify(providerRaw)}`
+  let provider: ForgeProvider = 'gitlab'
+  if (providerRaw !== undefined) {
+    if (typeof providerRaw !== 'string' || !(PROVIDERS as readonly string[]).includes(providerRaw)) {
+      return `site.provider must be one of ${PROVIDERS.join(', ')}, got ${JSON.stringify(providerRaw)}`
+    }
+    provider = providerRaw as ForgeProvider
+  }
   const tokenRef = typeof fields.tokenRef === 'string' && fields.tokenRef.trim() !== ''
     ? fields.tokenRef.trim()
-    : provider === 'github' ? 'GITHUB_TOKEN' : 'GITLAB_TOKEN'
+    : DEFAULT_TOKEN_REFS[provider]
   try {
     refOf(tokenRef)
   } catch (error) {

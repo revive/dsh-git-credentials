@@ -10,10 +10,30 @@ to users as the release notes.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-09
+
+### Added
+
+- The Settings panel separates configured sites from the add form: the configured list is a card
+  list with per-site facts and row actions, and the add form is its own card with one save button.
+- Sites can be configured for every provider the tools support. The admin site write only accepted
+  `gitlab` and `github`, so Gitee, Gitea, and Bitbucket sites were rejected with HTTP 400 even
+  though the store and the tool layer support them. The write now accepts all five providers and
+  defaults each provider's token reference name.
+
 ### Changed
 
-- GitHub Releases are composed from this file's section for the tag's version instead of
-  a fixed notice; a version without a section falls back to GitHub's generated notes.
+- One write saves a site and its token together: the separate "save token" button is gone from both
+  the add form and the edit card, so a token can no longer be stored for a site that does not exist
+  yet. Clearing a token stays its own action, next to the token field.
+- Field rules are stated before a write. The site id and token reference rules appear as field help,
+  an invalid draft explains itself in prose instead of a regular expression and disables save, and a
+  provider switch only replaces values the user has not typed.
+- Panel styling draws on the Host pages beside it: it copies their control metrics, focus behavior,
+  and list rhythm, and the only thing shared with the Host is the `--dsw-*` theme tokens. The
+  previous hardcoded colors are gone, so the panel follows light and dark themes.
+- GitHub Releases are composed from this file's section for the tag's version instead of a fixed
+  notice; a version without a section falls back to GitHub's generated notes.
 
 ## [0.4.0] - 2026-10-05
 
