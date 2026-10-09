@@ -8,15 +8,14 @@
 /** One supported forge provider (mirrors the store's union). */
 export type ProviderId = 'gitlab' | 'github' | 'gitee' | 'gitea' | 'bitbucket'
 
-/** One configured site as the admin state reports it. */
+/** One configured site as the admin state reports it: one site owns one token. */
 export interface AdminSite {
   provider: ProviderId
   baseUrl: string
-  tokenRef: string
   defaultProject?: string
 }
 
-/** Token state of one reference, as the admin state reports it. */
+/** Token state of one site, as the admin state reports it. */
 export interface AdminToken {
   configured: boolean
   source?: string

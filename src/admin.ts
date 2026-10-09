@@ -18,7 +18,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { GitStore, SiteConfig } from './store.ts'
-import { refOf, type ForgeProvider } from './store.ts'
+import type { ForgeProvider } from './store.ts'
 
 /** Structural slice of the webserver route API. */
 interface WebRouteRegistrar {
@@ -43,15 +43,6 @@ const SITE_ID_PATTERN = /^[a-z][a-z0-9-]*$/
 
 /** Every provider the store and the tool layer support, in picker order. */
 const PROVIDERS: readonly ForgeProvider[] = ['gitlab', 'github', 'gitee', 'gitea', 'bitbucket']
-
-/** Provider → the token reference name a site defaults to. */
-const DEFAULT_TOKEN_REFS: Record<ForgeProvider, string> = {
-  gitlab: 'GITLAB_TOKEN',
-  github: 'GITHUB_TOKEN',
-  gitee: 'GITEE_TOKEN',
-  gitea: 'GITEA_TOKEN',
-  bitbucket: 'BITBUCKET_TOKEN',
-}
 
 /**
  * Register the management routes; a no-op where no webserver exists.
@@ -84,10 +75,11 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 
-/** One validated site write from the panel. */
+/** One validated site write from the panel, with an optional token to store beside it. */
 interface ParsedSite {
   readonly id: string
   readonly site: SiteConfig
+  readonly token?: string
 }
 
 /** Validate a site write body; returns the normalized write or the problem text. */
@@ -118,13 +110,9 @@ function parseSite(body: unknown): ParsedSite | string {
     }
     provider = providerRaw as ForgeProvider
   }
-  const tokenRef = typeof fields.tokenRef === 'string' && fields.tokenRef.trim() !== ''
-    ? fields.tokenRef.trim()
-    : DEFAULT_TOKEN_REFS[provider]
-  try {
-    refOf(tokenRef)
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error)
+  const token = record.token
+  if (token !== undefined && (typeof token !== 'string' || token === '')) {
+    return 'token must be a non-empty string when present'
   }
   const defaultProject = typeof fields.defaultProject === 'string' && fields.defaultProject.trim() !== ''
     ? fields.defaultProject.trim()
@@ -134,9 +122,9 @@ function parseSite(body: unknown): ParsedSite | string {
     site: {
       provider,
       baseUrl: baseUrl.trim(),
-      tokenRef,
       ...defaultProject === undefined ? {} : { defaultProject },
     },
+    ...token === undefined ? {} : { token },
   }
 }
 
@@ -147,8 +135,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: GitLabAdm
     if (req.method === 'GET' && pathname === `${ADMIN_PREFIX}/state`) {
       const value = deps.store.read()
       const tokens: Record<string, { configured: boolean }> = {}
-      for (const site of Object.values(value.sites)) {
-        tokens[site.tokenRef] = { configured: deps.store.configured(site.tokenRef) }
+      for (const id of Object.keys(value.sites)) {
+        tokens[id] = { configured: deps.store.configured(id) }
       }
       sendJson(res, 200, { defaultSite: value.defaultSite, sites: value.sites, tokens })
       return
@@ -160,9 +148,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: GitLabAdm
         return
       }
       const value = deps.store.read()
+      // One write carries the site and its token: a site never exists without
+      // the credential it was saved with.
       await deps.store.write({
         ...value,
         sites: { ...value.sites, [parsed.id]: parsed.site },
+        ...parsed.token === undefined ? {} : { tokens: { ...value.tokens, [parsed.id]: parsed.token } },
       })
       sendJson(res, 200, { ok: true })
       return
@@ -174,45 +165,42 @@ async function handle(req: IncomingMessage, res: ServerResponse, deps: GitLabAdm
         sendJson(res, 404, { error: `no such site: ${id}` })
         return
       }
+      // The token belongs to the site, so removing one removes both.
       const sites = { ...value.sites }
       delete sites[id]
-      await deps.store.write({ ...value, sites })
+      const tokens = { ...value.tokens }
+      delete tokens[id]
+      await deps.store.write({ ...value, sites, tokens })
       sendJson(res, 200, { ok: true })
       return
     }
     if (req.method === 'POST' && pathname === `${ADMIN_PREFIX}/token`) {
       const body = (await readJson(req)) as Record<string, unknown> | undefined
-      const ref = typeof body?.ref === 'string' ? body.ref : ''
-      const value = typeof body?.value === 'string' ? body.value : ''
-      let branded: ReturnType<typeof refOf>
-      try {
-        branded = refOf(ref)
-      } catch (error) {
-        sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
-        return
-      }
-      if (value === '') {
+      const site = typeof body?.site === 'string' ? body.site : ''
+      const token = typeof body?.value === 'string' ? body.value : ''
+      if (token === '') {
         sendJson(res, 400, { error: 'token value must be a non-empty string' })
         return
       }
       const current = deps.store.read()
-      await deps.store.write({ ...current, tokens: { ...current.tokens, [branded]: value } })
+      if (!(site in current.sites)) {
+        sendJson(res, 404, { error: `no such site: ${site}` })
+        return
+      }
+      await deps.store.write({ ...current, tokens: { ...current.tokens, [site]: token } })
       sendJson(res, 200, { ok: true })
       return
     }
     if (req.method === 'DELETE' && pathname === `${ADMIN_PREFIX}/token`) {
       const body = (await readJson(req)) as Record<string, unknown> | undefined
-      const ref = typeof body?.ref === 'string' ? body.ref : ''
-      let branded: ReturnType<typeof refOf>
-      try {
-        branded = refOf(ref)
-      } catch (error) {
-        sendJson(res, 400, { error: error instanceof Error ? error.message : String(error) })
+      const site = typeof body?.site === 'string' ? body.site : ''
+      const current = deps.store.read()
+      if (!(site in current.sites)) {
+        sendJson(res, 404, { error: `no such site: ${site}` })
         return
       }
-      const current = deps.store.read()
       const tokens = { ...current.tokens }
-      delete tokens[branded]
+      delete tokens[site]
       await deps.store.write({ ...current, tokens })
       sendJson(res, 200, { ok: true })
       return

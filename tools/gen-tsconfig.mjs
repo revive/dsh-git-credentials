@@ -12,8 +12,20 @@
  * @module gen-tsconfig
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+
+/**
+ * Whether one mapped target is a declaration the program can actually consume:
+ * a file, or a directory carrying an `index.d.ts`. A source directory exists
+ * but is not a built face.
+ * @param path - the mapped path.
+ * @returns true when the path resolves as declarations.
+ */
+function usable(path) {
+  if (!existsSync(path)) return false
+  return statSync(path).isDirectory() ? existsSync(join(path, 'index.d.ts')) : true
+}
 
 // Out-of-tree development needs the harness checkout explicitly; no
 // machine-specific default is baked in.
@@ -55,26 +67,33 @@ const FACE_GROUPS = ['packages/client/', 'packages/host/', 'packages/api/gateway
 
 const paths = {}
 for (const [key, targets] of Object.entries(basePaths)) {
-  paths[key] = targets.map(target => {
+  paths[key] = targets.flatMap(target => {
     const rest = target.replace(/^\.\//, '')
     if (rest.startsWith('vendor/')) {
       const name = rest.split('/')[1]
-      return `${REPO}/vendor/${name}/lib/types`
+      return [`${REPO}/vendor/${name}/lib/types`]
     }
     if (rest.startsWith('native/')) {
-      return `${REPO}/native/landlock-run/packages/entry/lib`
+      return [`${REPO}/native/landlock-run/packages/entry/lib`]
     }
     if (FACE_GROUPS.some(group => rest.startsWith(group))) {
-      // Any src/ subtree (package root, subpath file, or subpath directory)
-      // maps to the matching built declaration subtree under lib/types. A
-      // checkout that has not built its client face yet has no such file
-      // (only some faces emit lib/types/client/**), so fall back to that
-      // face's source: the program then still resolves the import and still
-      // receives the face's own Context/Event declaration merges.
-      const built = `${REPO}/${rest.replace('/src/', '/lib/types/').replace(/\.ts$/, '.d.ts')}`
-      return existsSync(built) ? built : `${REPO}/${rest}`
+      // Any src/ subtree (package root directory, subpath file, or subpath
+      // directory) maps to the matching built declaration subtree under
+      // lib/types. A checkout that has not built its client face yet has no
+      // such file (only some faces emit lib/types/client/**), so fall back to
+      // that face's source: the program then still resolves the import and
+      // still receives the face's own Context/Event declaration merges.
+      // Consuming a face's SOURCE is a last resort: its CSS-module imports have
+      // no declarations outside the harness's own build, so a built face is
+      // always preferred where one exists.
+      const built = `${REPO}/${rest.replace(/\/src(\/|$)/, '/lib/types$1').replace(/\.ts$/, '.d.ts')}`
+      // A wildcard target names many packages and cannot be probed one by one:
+      // prefer the built pattern and keep the source pattern as the target TS
+      // tries next for a package that has no built face.
+      if (rest.includes('*')) return [built, `${REPO}/${rest}`]
+      return [usable(built) ? built : `${REPO}/${rest}`]
     }
-    return `${REPO}/${rest}`
+    return [`${REPO}/${rest}`]
   })
 }
 Object.assign(paths, EXTRA_PATHS)

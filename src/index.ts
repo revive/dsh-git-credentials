@@ -26,7 +26,7 @@ import { GitHubClient, type GitHubFile } from './github.ts'
 import { GiteeClient } from './gitee.ts'
 import { GiteaClient } from './gitea.ts'
 import { BitbucketClient } from './bitbucket.ts'
-import { GitStore, refOf, type ForgeProvider } from './store.ts'
+import { GitStore, type ForgeProvider } from './store.ts'
 import { registerGitLabAdmin } from './admin.ts'
 
 export const name = 'git-credentials'
@@ -236,7 +236,6 @@ export function apply(ctx: Context, config: PluginConfig): void {
     const base = {
       id,
       baseUrl: site.baseUrl,
-      tokenRef: refOf(site.tokenRef),
       ...site.defaultProject === undefined ? {} : { defaultProject: site.defaultProject },
     }
     switch (site.provider) {

@@ -10,6 +10,24 @@ to users as the release notes.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-09
+
+### Added
+
+- The Settings panel follows the Harness UI language: its copy and its navigation label are
+  registered in Chinese and English through the client locale service, and the panel reads them
+  through the locale-bound `t` its section registration declares.
+
+### Changed
+
+- A site owns exactly one token. The token reference name is gone from the store, the admin API,
+  the tools, and the panel: saving a site and its token is one request, rotating a token is the same
+  save, and deleting a site deletes its token, so a credential can neither outlive its site nor be
+  shared by accident. A store written by an earlier version is migrated on read — each site's
+  referenced value becomes its own token, and reference keys that no site referenced are dropped.
+- Field hints state the rule and nothing more (site id charset, API root, token optionality), and the
+  token reference field and its hint are gone with the model change.
+
 ## [0.5.0] - 2026-10-09
 
 ### Added

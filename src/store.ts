@@ -13,33 +13,14 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-/** Nominal reference to one token: a POSIX-style identifier, as before. */
-declare const refBrand: unique symbol
-export type TokenRef = string & { readonly [refBrand]: true }
-
-const REF_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
-
-/**
- * Brand a raw string as a {@link TokenRef}; throws on non-identifier input.
- * @param value - candidate reference, e.g. `GITLAB_TOKEN`.
- * @returns the branded reference.
- */
-export function refOf(value: string): TokenRef {
-  if (!REF_PATTERN.test(value)) {
-    throw new TypeError(`token ref "${value}" must match ${String(REF_PATTERN)}`)
-  }
-  return value as TokenRef
-}
-
 /** Supported forge providers. */
 export type ForgeProvider = 'gitlab' | 'github' | 'gitee' | 'gitea' | 'bitbucket'
 
-/** One configured site. */
+/** One configured site: one site carries exactly one token. */
 export interface SiteConfig {
   /** Which provider's API this site speaks. */
   provider: ForgeProvider
   baseUrl: string
-  tokenRef: string
   defaultProject?: string
 }
 
@@ -47,7 +28,7 @@ export interface SiteConfig {
 export interface StoreState {
   defaultSite?: string
   sites: Record<string, SiteConfig>
-  /** Token values keyed by reference; the only secret material. */
+  /** Token values keyed by site id; the only secret material. */
   tokens: Record<string, string>
 }
 
@@ -132,7 +113,7 @@ export class GitStore {
       )
     }
     try {
-      return JSON.parse(plain.toString('utf8')) as StoreState
+      return normalizeState(JSON.parse(plain.toString('utf8')))
     } catch (error) {
       throw new Error(`gitlab-plugin: decrypted payload is not valid JSON: ${errorMessage(error)}`, { cause: error })
     }
@@ -160,9 +141,9 @@ export class GitStore {
     renameSync(tmp, this.paths.dataPath)
   }
 
-  /** Whether one reference currently holds a non-empty value. */
-  configured(ref: string): boolean {
-    const value = this.read().tokens[ref]
+  /** Whether one site currently holds a non-empty token. */
+  configured(siteId: string): boolean {
+    const value = this.read().tokens[siteId]
     return value !== undefined && value !== ''
   }
 
@@ -184,6 +165,58 @@ export class GitStore {
     writeFileSync(this.paths.keyPath, key, { mode: 0o600 })
     return key
   }
+}
+
+/**
+ * Normalize one decrypted document into the current state shape.
+ *
+ * Sites used to name a shared token through a `tokenRef`, with values keyed by
+ * that reference. A site now owns its token, keyed by the site id, so a legacy
+ * document is migrated on read: each site's referenced value is copied onto the
+ * site id and the `tokenRef` field is dropped. Reference-keyed values that no
+ * site referenced are not carried over — nothing could ever have read them.
+ * @param raw - the decrypted document.
+ * @returns the normalized state.
+ */
+export function normalizeState(raw: unknown): StoreState {
+  const document = isRecord(raw) ? raw : {}
+  const rawSites = isRecord(document.sites) ? document.sites : {}
+  const rawTokens = isRecord(document.tokens) ? document.tokens : {}
+  const sites: Record<string, SiteConfig> = {}
+  const legacy: Array<readonly [string, string]> = []
+  for (const [id, value] of Object.entries(rawSites)) {
+    if (!isRecord(value)) continue
+    const provider = typeof value.provider === 'string' ? value.provider as ForgeProvider : 'gitlab'
+    const baseUrl = typeof value.baseUrl === 'string' ? value.baseUrl : ''
+    const defaultProject = value.defaultProject
+    sites[id] = {
+      provider,
+      baseUrl,
+      ...typeof defaultProject === 'string' && defaultProject !== '' ? { defaultProject } : {},
+    }
+    if (typeof value.tokenRef === 'string' && value.tokenRef !== '') legacy.push([id, value.tokenRef])
+  }
+  const tokens: Record<string, string> = {}
+  for (const id of Object.keys(sites)) {
+    const own = rawTokens[id]
+    if (typeof own === 'string') tokens[id] = own
+  }
+  for (const [id, ref] of legacy) {
+    if (tokens[id] !== undefined) continue
+    const referenced = rawTokens[ref]
+    if (typeof referenced === 'string' && referenced !== '') tokens[id] = referenced
+  }
+  const defaultSite = document.defaultSite
+  return {
+    ...typeof defaultSite === 'string' ? { defaultSite } : {},
+    sites,
+    tokens,
+  }
+}
+
+/** Whether one unknown value is a plain JSON object. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 /** Human-readable failure text for any thrown value. */

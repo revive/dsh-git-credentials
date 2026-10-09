@@ -5,28 +5,25 @@
  * @module git-http
  */
 
-import type { TokenRef } from './store.ts'
-
-/** One configured site as the clients see it. */
+/** One configured site as the clients see it: one site owns exactly one token. */
 export interface AuthedSite {
   readonly id: string
   readonly baseUrl: string
-  readonly tokenRef: TokenRef
   readonly defaultProject?: string
 }
 
 /**
- * Resolve the site token from one operation snapshot; fails loud when the
- * reference is unconfigured.
- * @param tokens - the operation's decrypted token snapshot.
+ * Resolve the site's own token from one operation snapshot; fails loud when it
+ * is unconfigured.
+ * @param tokens - the operation's decrypted token snapshot, keyed by site id.
  * @param site - the site whose token is needed.
  * @returns the non-empty token value.
  */
 export function tokenFor(tokens: Readonly<Record<string, string>>, site: AuthedSite): string {
-  const value = tokens[site.tokenRef]
+  const value = tokens[site.id]
   if (value === undefined || value === '') {
     throw new Error(
-      `site "${site.id}": token ${site.tokenRef} is not configured. Add it in Settings → Git 凭据.`,
+      `site "${site.id}": no token is configured. Add one in Settings → Git 凭据.`,
     )
   }
   return value

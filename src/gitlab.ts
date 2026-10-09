@@ -522,7 +522,7 @@ export class GitLabClient {
     if (!response.ok) {
       const detail = await errorDetail(response)
       const hint = response.status === 401
-        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        ? ` — the token of site "${this.site.id}" is invalid or expired; rotate it in Settings → Git 凭据`
         : ''
       throw new Error(`GitLab site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
     }
@@ -546,7 +546,7 @@ export class GitLabClient {
     if (!response.ok) {
       const detail = await errorDetail(response)
       const hint = response.status === 401
-        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        ? ` — the token of site "${this.site.id}" is invalid or expired; rotate it in Settings → Git 凭据`
         : ''
       throw new Error(`GitLab site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
     }
@@ -571,7 +571,7 @@ export class GitLabClient {
     if (!response.ok) {
       const detail = await errorDetail(response)
       const hint = response.status === 401
-        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        ? ` — the token of site "${this.site.id}" is invalid or expired; rotate it in Settings → Git 凭据`
         : ''
       throw new Error(`GitLab site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
     }
@@ -600,7 +600,7 @@ export class GitLabClient {
     if (!response.ok) {
       const detail = await errorDetail(response)
       const hint = response.status === 401
-        ? ` — the ${this.site.tokenRef} token is invalid or expired; rotate it in Settings → Git 凭据`
+        ? ` — the token of site "${this.site.id}" is invalid or expired; rotate it in Settings → Git 凭据`
         : ''
       throw new Error(`GitLab site "${this.site.id}": ${path} returned ${response.status} ${detail}${hint}`)
     }

@@ -7,7 +7,7 @@
 
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的独立外挂插件：管理 GitLab、GitHub、Gitee、Gitea 与 Bitbucket 的 API token，**token 值永不进入大模型的上下文**。
 
-模型工具只携带 token 的**引用名**（如 `GITLAB_TOKEN`），每次调用时才从插件自己的加密存储中解密一次，token 只出现在发出的 HTTP 请求头里。修改站点或轮换 token 后下一次调用立即生效，无需重启。
+模型工具只携带**站点 id**（如 `corp`），该站点自己的 token 在每次调用时才从插件的加密存储中解密一次，只出现在发出的 HTTP 请求头里。修改站点或轮换 token 后下一次调用立即生效，无需重启。
 
 ## 特性
 
@@ -27,7 +27,7 @@ GitHub 发布了官方 MCP server，harness 也原生支持 MCP 客户端——�
 | | 官方 GitHub MCP | 本插件 |
 |---|---|---|
 | 覆盖平台 | 只有 GitHub（GitLab 有官方 server；Gitee / Gitea / Bitbucket 依赖第三方 server，质量与维护参差） | 一个加密存储、一个设置面板、一套工具管 GitLab、GitHub、Gitee、Gitea、Bitbucket——含自托管 Gitea / GitLab |
-| token 处理 | 每台 server 环境变量明文配置，无管理界面 | AES-256-GCM 加密存储 + token 引用名 + 设置页管理；token 值永不进入模型上下文 |
+| token 处理 | 每台 server 环境变量明文配置，无管理界面 | AES-256-GCM 加密存储 + 一个站点一个 token + 设置页管理；token 值永不进入模型上下文 |
 | 集成形态 | 多一层 MCP 代理进程 | 工具直接注册进 harness 工具注册表 |
 
 单一托管平台 + 标准 token 处理，走 MCP 即可；多 forge（尤其是 Gitee、自托管 Gitea）、或想要加密存储 + 产品内管理页面时，用本插件。
@@ -94,8 +94,10 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 
 在 **设置 → Git 凭据** 中管理站点与 token：
 
-- **添加站点**：表单在列表下方独立的「新增站点」卡片里，含站点 id、provider（GitLab / GitHub / Gitee / Gitea / Bitbucket）、API 地址（各 provider 默认值：`https://api.github.com`、`https://gitee.com/api/v5`、`https://api.bitbucket.org/2.0`；GitLab 与 Gitea 是自托管，需自己填地址，如 `https://gitlab.example.com` / `https://gitea.example.com/api/v1`）、token 引用名（默认 `GITLAB_TOKEN` / `GITHUB_TOKEN` / `GITEE_TOKEN` / `GITEA_TOKEN` / `BITBUCKET_TOKEN`）、token 值（可选）与默认项目（可选）。一个「保存」把站点与 token 一起写入；各字段规则（站点 id 字符集、token 引用名字符集、http(s) 地址）作为字段说明直接写在输入框下方，草稿不合法时用中文说明问题并禁用「保存」，不必等服务器报错
-- **每个已保存的站点**：默认在自己的卡片里只读展示（provider、地址、token 引用名、默认项目、token 配置状态），操作为「编辑」与「删除站点」；编辑态显示各输入框及「保存 / 取消」，一次保存同时提交字段与新填的 token 值，清除 token 则用 token 字段旁的「清除 Token」
+- **添加站点**：表单在列表下方独立的「新增站点」卡片里，含站点 id、provider（GitLab / GitHub / Gitee / Gitea / Bitbucket）、API 地址（各 provider 默认值：`https://api.github.com`、`https://gitee.com/api/v5`、`https://api.bitbucket.org/2.0`；GitLab 与 Gitea 是自托管，需自己填地址，如 `https://gitlab.example.com` / `https://gitea.example.com/api/v1`）、该站点的 token 与默认项目（可选）。一个「保存」把站点与 token 一起写入；字段规则（站点 id 字符集、http(s) 地址）直接写在输入框下方，草稿不合法时说明问题并禁用「保存」，不必等服务器报错
+- **每个已保存的站点**：默认在自己的卡片里只读展示（provider、地址、默认项目、token 状态），操作为「编辑」与「删除站点」；编辑态显示各输入框及「保存 / 取消」，一次保存同时提交字段与新填的 token，清除 token 用 token 字段旁的「清除 token」；删除站点会连同它的 token 一起删除
+- **一个站点一个 token**：token 属于保存它的那个站点，既不会比站点活得更久，也不会被误共享
+- 面板跟随 Harness 的界面语言：文案与导航标题都通过客户端 locale 服务注册了中文与英文
 - 面板通过同源 `/git-credentials-admin/*` JSON 端点读写加密存储；任何响应都不携带 token 值
 - 所有改动即时生效——每次工具调用读一份解密快照
 
@@ -136,14 +138,14 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 - `file` 恒为读取：`project`、`path`、`ref?`（默认分支；超过字节上限截断并标记）
 - `bitbucket_repos` 的 create 需要站点 `defaultProject`（`workspace/repo`）才能确定 workspace
 - Bitbucket 没有 releases API，因此没有 `bitbucket_releases` 工具；release 的 delete 用 release `number`（GitLab 按 `tag` 删除）
-- token 引用名是 POSIX 标识符（`GITLAB_TOKEN`、`GITHUB_TOKEN`、`GITEE_TOKEN`、`GITEA_TOKEN`、`BITBUCKET_TOKEN`…），多站点可各配各的 ref，或共享一个 ref
+- 一个站点恰好拥有一个 token，以站点 id 为键存储：删除站点会连同 token 一起删除，token 也不会在站点之间共享。旧版本写下的存储（站点通过引用名共享 token）会在读取时自动迁移——每个站点引用到的值成为它自己的 token，没有任何站点引用的引用名会被丢弃
 - GitLab 用 `PRIVATE-TOKEN` 头；GitHub、Gitee、Bitbucket 用 `Authorization: Bearer`（Gitee 在头被拒绝时自动兜底 `access_token` URL 参数）；Gitea 用 `Authorization: token`
 - HTTP 走 Node 内置 `fetch` 直连——刻意不用 `ctx.web.fetch`（只收 URL、无 header）
 ## 工作原理
 
 ```
 ~/.dsh/git-credentials.json（AES-256-GCM 加密：站点 + token 值）
-  → 工具执行时解密一份快照，按 provider 过滤站点 + resolve(tokenRef)
+  → 工具执行时解密一份快照，按 provider 过滤站点，读取该站点自己的 token
   → fetch(baseUrl/<provider api path>, { headers: { PRIVATE-TOKEN | Bearer | token } })
   → 工具参数/返回值/错误信息里只有 site、project、path 等业务数据
 ```
@@ -154,7 +156,7 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 
 浏览器半边面向当前的客户端 slot 标准：面板是 `settings.section` 列表项，组件接收组合后的 section props；typecheck 程序通过 type-only import 引入 slot 契约。请针对实际运行的检出做类型检查——切换 harness 版本后重新生成 `tsconfig.json`。尚未构建客户端 face 的检出会回退到这些包的源码；如果报错指向 `packages/.../src`，先在检出里跑 `pnpm run build:lib:client` 构建该 face，再重新检查。
 
-**面板自带控件实现。** `src/client/panel-css.ts` 把面板旁边那些宿主页面的控件尺寸、focus 行为与列表节奏抄进插件（类名统一加 `dshgc-` 前缀），与宿主共享的只有 `--dsw-*` 主题 token，因此浅色/深色自动跟随。**刻意不以模块方式 import** `@deepseek-ai/dsh-client-ui-primitives` 等 Harness Client 包：它们会无预警地变动，而组件抛错会让整个 slot 条目变空白。`dsh.client.inject` 只用于排序激活，仍然允许。
+**面板自带控件实现与文案。** `src/client/panel-css.ts` 把面板旁边那些宿主页面的控件尺寸、focus 行为与列表节奏抄进插件（类名统一加 `dshgc-` 前缀），与宿主共享的只有 `--dsw-*` 主题 token，因此浅色/深色自动跟随。**刻意不以模块方式 import** `@deepseek-ai/dsh-client-ui-primitives` 等 Harness Client 包：它们会无预警地变动，而组件抛错会让整个 slot 条目变空白。`dsh.client.inject` 只用于排序激活，仍然允许。所有可见文案都通过客户端 locale 服务注册（`src/client/locales.ts`，中文 + 英文），组件里用注册项注入的 `t` 读取，因此面板正文与导航标题都跟随 Harness 的界面语言。
 
 **harness 兼容性由 manifest 强制把关。** DSH 会读取本包的 `peerDependencies` 中所有 `@deepseek-ai/dsh` 与 `@deepseek-ai/dsh-*` 声明，只要有一个 range 不匹配当前运行的 harness 版本（含预发布版），就拒绝应用该 bundle 层：被拒的 bundle 不贡献任何工具与设置页，harness 会报告被拒的 peer。`@deepseek-ai/dsh-tools` 的 range 有意放宽为 `>=0.1.7-rc.1 <1.0.0`，使 0.x 线内的 harness 升级本身不会导致 bundle 被拒（harness 各包与产品版本同步发布）。因此遇到新 harness 版本时的流程是：重新生成 `tsconfig.json`、跑 `pnpm typecheck` 与 `pnpm smoke`；只有当这些真的失败时才动 range，并把 `<1.0.0` 当作重新验证的边界。不安装也能校验——这个检查只读 manifest：
 

@@ -1,14 +1,15 @@
 /**
- * The Settings → Git 凭据 management panel: add, edit, and delete sites
- * (provider + API base URL + token reference) and store or clear each site's
- * token value. Every write goes to the plugin's own `/git-credentials-admin/*`
+ * The Settings → Git Credentials management panel: add, edit, and delete sites
+ * (provider, API base URL, and the site's own token — one site carries exactly
+ * one token). Every write goes to the plugin's own `/git-credentials-admin/*`
  * routes, which the host half registers on the GUI webserver; token values never
  * appear in any response, so the panel only ever shows configured state.
  *
  * The panel is a `settings.section` list entry of the current slot standard: it
- * receives the composed section props and injects nothing. A failed admin read
- * renders its error with a retry affordance instead of a permanently blank
- * content column.
+ * receives the composed section props — the section owner's `close` plus the
+ * standard kit, including the locale-bound `t` its registration declared — and
+ * injects nothing. A failed admin read renders its error with a retry
+ * affordance instead of a permanently blank content column.
  *
  * Styling follows the Host page the panel sits beside (see ./panel-css.ts):
  * controls are the plugin's own markup and CSS, and the only thing shared with
@@ -18,28 +19,30 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { ComposedProps, EntryKeyOf } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ComposedProps, EntryKeyOf, Translate } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pulls the settings SlotMap merge (the 'settings.section' entry).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { adminGet, adminWrite } from './admin-api.ts'
 import type { AdminSite, AdminState, AdminToken, ProviderId } from './admin-api.ts'
+import type { GitCredentialsKey } from './locales.ts'
 import {
-  BASE_URL_PLACEHOLDERS, DEFAULT_BASE_URLS, DEFAULT_TOKEN_REFS, PROVIDER_LABELS, PROVIDER_ORDER,
-  SITE_ID_HELP, TOKEN_REF_HELP, baseUrlProblem, isStockBaseUrl, isStockTokenRef, siteIdProblem,
-  tokenRefProblem,
+  BASE_URL_PLACEHOLDERS, DEFAULT_BASE_URLS, PROVIDER_LABELS, PROVIDER_ORDER,
+  baseUrlProblem, isStockBaseUrl, siteIdProblem, type SiteProblemKey,
 } from './site-model.ts'
 import { PANEL_CSS } from './panel-css.ts'
 
-/** The composed props of one settings.section entry (the panel consumes none of them). */
+/** The panel's translate function, bound to its locale namespace. */
+type PanelTranslate = Translate<GitCredentialsKey>
+
+/** The composed props of one settings.section entry (the panel reads only `t`). */
 export type GitLabSettingsPanelProps = ComposedProps<
-  'settings.section', EntryKeyOf<'settings.section'>, never, undefined, object
+  'settings.section', EntryKeyOf<'settings.section'>, never, undefined, object, never, 'git-credentials'
 >
 
 /** One site's editable draft (the token value never round-trips from the server). */
 interface SiteDraft {
   provider: ProviderId
   baseUrl: string
-  tokenRef: string
   defaultProject: string
   token: string
 }
@@ -54,9 +57,8 @@ const EMPTY_ADD: AddDraft = {
   id: '',
   provider: 'gitlab',
   baseUrl: '',
-  tokenRef: DEFAULT_TOKEN_REFS.gitlab,
-  token: '',
   defaultProject: '',
+  token: '',
 }
 
 /** A no-op edit handler for the read-only sites. */
@@ -67,7 +69,6 @@ function draftOf(site: AdminSite): SiteDraft {
   return {
     provider: site.provider,
     baseUrl: site.baseUrl,
-    tokenRef: site.tokenRef,
     defaultProject: site.defaultProject ?? '',
     token: '',
   }
@@ -79,17 +80,16 @@ function messageOf(caught: unknown): string {
 }
 
 /**
- * The Git 凭据 settings section. The composed section props are unused — the
- * panel talks to the admin routes directly.
- * @param _props - the composed settings.section props (unused).
+ * The Git Credentials settings section.
+ * @param props - the composed settings.section props (only `t` is read).
  * @returns the panel.
  */
-export function GitLabSettingsPanel(_props: GitLabSettingsPanelProps): ReactNode {
-  return <Loaded />
+export function GitLabSettingsPanel({ t }: GitLabSettingsPanelProps): ReactNode {
+  return <Loaded t={t} />
 }
 
 /** The mounted panel body: local state only, every write via the admin routes. */
-function Loaded(): ReactNode {
+function Loaded({ t }: { t: PanelTranslate }): ReactNode {
   const [state, setState] = useState<AdminState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -108,9 +108,9 @@ function Loaded(): ReactNode {
       setState(await adminGet('/git-credentials-admin/state') as AdminState)
     } catch (caught) {
       setState(null)
-      setError(`Git 凭据管理暂不可用：${messageOf(caught)}`)
+      setError(t('loadFailed', { reason: messageOf(caught) }))
     }
-  }, [])
+  }, [t])
 
   useEffect(() => { void load() }, [load])
 
@@ -129,21 +129,17 @@ function Loaded(): ReactNode {
     }
   }, [load])
 
-  /** Write one site and, when the draft carries a fresh token, that token too. */
+  /** Write one site in one request: its fields and, when typed, its token. */
   const writeSite = async (id: string, draft: SiteDraft): Promise<void> => {
-    const tokenRef = draft.tokenRef.trim()
     await adminWrite('POST', '/git-credentials-admin/sites', {
       id,
       site: {
         provider: draft.provider,
         baseUrl: draft.baseUrl.trim(),
-        tokenRef,
         ...draft.defaultProject.trim() === '' ? {} : { defaultProject: draft.defaultProject.trim() },
       },
+      ...draft.token === '' ? {} : { token: draft.token },
     })
-    if (draft.token !== '') {
-      await adminWrite('POST', '/git-credentials-admin/token', { ref: tokenRef, value: draft.token })
-    }
   }
 
   const editAdd = useCallback((patch: Partial<AddDraft>): void => {
@@ -158,7 +154,6 @@ function Loaded(): ReactNode {
       provider,
       // Only a stock value is replaced: what the user typed stays.
       baseUrl: isStockBaseUrl(previous.baseUrl) ? DEFAULT_BASE_URLS[provider] : previous.baseUrl,
-      tokenRef: isStockTokenRef(previous.tokenRef) ? DEFAULT_TOKEN_REFS[provider] : previous.tokenRef,
     }))
   }, [])
 
@@ -168,7 +163,7 @@ function Loaded(): ReactNode {
       await writeSite(id, add)
       setAdd(EMPTY_ADD)
       setAddTouched(false)
-    }, `已保存站点 ${id}`)
+    }, t('noticeSaved', { site: id }))
   }
 
   const updateSite = (id: string, draft: SiteDraft): void => {
@@ -180,7 +175,7 @@ function Loaded(): ReactNode {
         return next
       })
       setEditing(previous => ({ ...previous, [id]: false }))
-    }, `已保存站点 ${id}`)
+    }, t('noticeSaved', { site: id }))
   }
 
   const deleteSite = (id: string): void => {
@@ -192,13 +187,13 @@ function Loaded(): ReactNode {
         return next
       })
       setEditing(previous => ({ ...previous, [id]: false }))
-    }, `已删除站点 ${id}`)
+    }, t('noticeDeleted', { site: id }))
   }
 
-  const clearToken = (ref: string): void => {
+  const clearToken = (id: string): void => {
     void run(async () => {
-      await adminWrite('DELETE', '/git-credentials-admin/token', { ref })
-    }, `已清除 ${ref} 的 token`)
+      await adminWrite('DELETE', '/git-credentials-admin/token', { site: id })
+    }, t('noticeTokenCleared', { site: id }))
   }
 
   const startEdit = (id: string, site: AdminSite): void => {
@@ -226,7 +221,6 @@ function Loaded(): ReactNode {
           ...draft,
           provider,
           baseUrl: isStockBaseUrl(draft.baseUrl) ? DEFAULT_BASE_URLS[provider] : draft.baseUrl,
-          tokenRef: isStockTokenRef(draft.tokenRef) ? DEFAULT_TOKEN_REFS[provider] : draft.tokenRef,
         },
       }
     })
@@ -239,12 +233,12 @@ function Loaded(): ReactNode {
     return (
       <Panel>
         {error === null
-          ? <p className="dshgc-muted">加载中…</p>
+          ? <p className="dshgc-muted">{t('loading')}</p>
           : (
             <>
               <p className="dshgc-error" role="alert">{error}</p>
               <div className="dshgc-actions">
-                <Button disabled={busy} onClick={() => void load()}>重试</Button>
+                <Button disabled={busy} onClick={() => void load()}>{t('retry')}</Button>
               </div>
             </>
           )}
@@ -255,36 +249,34 @@ function Loaded(): ReactNode {
   const ids = Object.keys(state.sites)
   const addIdProblem = siteIdProblem(add.id, ids)
   const addUrlProblem = baseUrlProblem(add.baseUrl)
-  const addRefProblem = tokenRefProblem(add.tokenRef)
-  const addBlocked = addIdProblem !== null || addUrlProblem !== null || addRefProblem !== null
+  const addBlocked = addIdProblem !== null || addUrlProblem !== null
 
   return (
     <Panel>
-      <p className="dshgc-intro">
-        GitLab、GitHub、Gitee、Gitea、Bitbucket 的站点（API 地址与凭据）。token 值只写入本地加密存储，任何响应都不回显。
-      </p>
+      <p className="dshgc-intro">{t('intro')}</p>
       <div className="dshgc-status">
-        <Button disabled={busy} onClick={() => void load()}>刷新</Button>
-        {busy && <span className="dshgc-muted">处理中…</span>}
+        <Button disabled={busy} onClick={() => void load()}>{t('refresh')}</Button>
+        {busy && <span className="dshgc-muted">{t('busy')}</span>}
         {!busy && error === null && notice !== null && <span className="dshgc-ok">{notice}</span>}
         {error !== null && <span className="dshgc-error" role="alert">{error}</span>}
       </div>
 
-      <h3 className="dshgc-heading">已配置的站点{ids.length === 0 ? '' : ` · ${ids.length}`}</h3>
+      <h3 className="dshgc-heading">{t('sitesHeading')}{ids.length === 0 ? '' : ` · ${ids.length}`}</h3>
       {ids.length === 0
-        ? <p className="dshgc-empty">还没有站点。用下面的「新增站点」添加第一个。</p>
+        ? <p className="dshgc-empty">{t('empty')}</p>
         : (
           <ul className="dshgc-cards">
             {ids.map(id => {
               const site = state.sites[id]
               if (site === undefined) return null
-              const token = state.tokens[site.tokenRef]
+              const token = state.tokens[id]
               const draft = drafts[id]
               return (
                 <li className="dshgc-card" key={id}>
                   {editing[id] === true && draft !== undefined
                     ? (
                       <SiteEditor
+                        t={t}
                         id={id}
                         draft={draft}
                         token={token}
@@ -298,11 +290,12 @@ function Loaded(): ReactNode {
                         onSave={() => updateSite(id, draft)}
                         onCancel={() => cancelEdit(id)}
                         onDelete={() => deleteSite(id)}
-                        onClearToken={() => clearToken(draft.tokenRef.trim())}
+                        onClearToken={() => clearToken(id)}
                       />
                     )
                     : (
                       <SiteFacts
+                        t={t}
                         id={id}
                         site={site}
                         token={token}
@@ -318,38 +311,33 @@ function Loaded(): ReactNode {
           </ul>
         )}
 
-      <h3 className="dshgc-heading">新增站点</h3>
+      <h3 className="dshgc-heading">{t('addHeading')}</h3>
       <div className="dshgc-card">
         <Field
-          id="dshgc-add-id" label="站点 id" text={add.id} disabled={busy}
-          hint={SITE_ID_HELP} placeholder="corp"
+          t={t} id="dshgc-add-id" label={t('siteId')} text={add.id} disabled={busy}
+          hint={t('hintSiteId')} placeholder="corp"
           problem={addTouched ? addIdProblem : null}
           onEdit={value => editAdd({ id: value })}
         />
-        <ProviderField id="dshgc-add-provider" value={add.provider} disabled={busy} onChange={pickAddProvider} />
+        <ProviderField t={t} id="dshgc-add-provider" value={add.provider} disabled={busy} onChange={pickAddProvider} />
         <Field
-          id="dshgc-add-url" label="API 地址" text={add.baseUrl} disabled={busy}
-          hint="该平台的 API 根地址" placeholder={BASE_URL_PLACEHOLDERS[add.provider]}
+          t={t} id="dshgc-add-url" label={t('apiUrl')} text={add.baseUrl} disabled={busy}
+          hint={t('hintApiUrl')} placeholder={BASE_URL_PLACEHOLDERS[add.provider]}
           problem={addTouched ? addUrlProblem : null}
           onEdit={value => editAdd({ baseUrl: value })}
         />
         <Field
-          id="dshgc-add-ref" label="token 引用名" text={add.tokenRef} disabled={busy}
-          hint={TOKEN_REF_HELP} problem={addTouched ? addRefProblem : null}
-          onEdit={value => editAdd({ tokenRef: value })}
-        />
-        <Field
-          id="dshgc-add-token" label="token 值" type="password" text={add.token} disabled={busy}
-          hint="可选：留空表示暂不设置，之后可在站点卡片里补上" problem={null}
+          t={t} id="dshgc-add-token" label={t('token')} type="password" text={add.token} disabled={busy}
+          hint={t('hintTokenAdd')} problem={null}
           onEdit={value => editAdd({ token: value })}
         />
         <Field
-          id="dshgc-add-project" label="默认项目（可选）" text={add.defaultProject} disabled={busy}
-          hint="工具调用未传 project 时使用，例如 owner/repo" problem={null}
+          t={t} id="dshgc-add-project" label={t('labelDefaultProject')} text={add.defaultProject}
+          disabled={busy} hint={t('hintDefaultProject')} problem={null}
           onEdit={value => editAdd({ defaultProject: value })}
         />
         <div className="dshgc-actions dshgc-actionsEnd dshgc-divider">
-          <Button variant="primary" disabled={busy || addBlocked} onClick={addSite}>保存</Button>
+          <Button variant="primary" disabled={busy || addBlocked} onClick={addSite}>{t('save')}</Button>
         </div>
       </div>
     </Panel>
@@ -368,6 +356,7 @@ function Panel(props: { children: ReactNode }): ReactNode {
 
 /** One site in read-only form: the facts, the token state, and the row actions. */
 function SiteFacts(props: {
+  t: PanelTranslate
   id: string
   site: AdminSite
   token: AdminToken | undefined
@@ -381,21 +370,19 @@ function SiteFacts(props: {
       <div className="dshgc-cardHead">
         <span className="dshgc-siteId">{props.id}</span>
         <span className="dshgc-tag">{PROVIDER_LABELS[props.site.provider]}</span>
-        {props.isDefault && <span className="dshgc-tag">默认站点</span>}
+        {props.isDefault && <span className="dshgc-tag">{props.t('defaultSite')}</span>}
         <span className="dshgc-spacer" />
-        <StatusTag configured={props.token?.configured === true} />
+        <StatusTag t={props.t} configured={props.token?.configured === true} />
       </div>
       <dl className="dshgc-facts">
-        <dt className="dshgc-factKey">API 地址</dt>
+        <dt className="dshgc-factKey">{props.t('apiUrl')}</dt>
         <dd className="dshgc-factValue">{props.site.baseUrl}</dd>
-        <dt className="dshgc-factKey">token 引用</dt>
-        <dd className="dshgc-factValue">{props.site.tokenRef}</dd>
-        <dt className="dshgc-factKey">默认项目</dt>
-        <dd className="dshgc-factValue">{props.site.defaultProject ?? '—'}</dd>
+        <dt className="dshgc-factKey">{props.t('defaultProject')}</dt>
+        <dd className="dshgc-factValue">{props.site.defaultProject ?? props.t('none')}</dd>
       </dl>
       <div className="dshgc-actions dshgc-actionsEnd">
-        <Button size="sm" disabled={props.busy} onClick={props.onEdit}>编辑</Button>
-        <Button size="sm" danger disabled={props.busy} onClick={props.onDelete}>删除站点</Button>
+        <Button size="sm" disabled={props.busy} onClick={props.onEdit}>{props.t('edit')}</Button>
+        <Button size="sm" danger disabled={props.busy} onClick={props.onDelete}>{props.t('delete')}</Button>
       </div>
     </>
   )
@@ -403,6 +390,7 @@ function SiteFacts(props: {
 
 /** One site in edit form: every field in one column, one save for all of them. */
 function SiteEditor(props: {
+  t: PanelTranslate
   id: string
   draft: SiteDraft
   token: AdminToken | undefined
@@ -415,59 +403,55 @@ function SiteEditor(props: {
   onClearToken: () => void
 }): ReactNode {
   const urlProblem = baseUrlProblem(props.draft.baseUrl)
-  const refProblem = tokenRefProblem(props.draft.tokenRef)
   const configured = props.token?.configured === true
   return (
     <>
       <div className="dshgc-cardHead">
         <span className="dshgc-siteId">{props.id}</span>
-        <span className="dshgc-tag">编辑中</span>
+        <span className="dshgc-tag">{props.t('editing')}</span>
       </div>
       <Field
-        id={`dshgc-site-${props.id}-id`} label="站点 id" text={props.id} disabled
-        hint="站点 id 是存储键，不可修改；需要改名请删除后重新添加" problem={null} onEdit={noop}
+        t={props.t} id={`dshgc-site-${props.id}-id`} label={props.t('siteId')} text={props.id} disabled
+        hint={props.t('hintSiteIdReadonly')} problem={null} onEdit={noop}
       />
       <ProviderField
-        id={`dshgc-site-${props.id}-provider`} value={props.draft.provider}
+        t={props.t} id={`dshgc-site-${props.id}-provider`} value={props.draft.provider}
         disabled={props.busy} onChange={props.onPickProvider}
       />
       <Field
-        id={`dshgc-site-${props.id}-url`} label="API 地址" text={props.draft.baseUrl} disabled={props.busy}
-        hint="该平台的 API 根地址" placeholder={BASE_URL_PLACEHOLDERS[props.draft.provider]}
+        t={props.t} id={`dshgc-site-${props.id}-url`} label={props.t('apiUrl')} text={props.draft.baseUrl}
+        disabled={props.busy} hint={props.t('hintApiUrl')} placeholder={BASE_URL_PLACEHOLDERS[props.draft.provider]}
         problem={urlProblem} onEdit={value => props.onChange({ baseUrl: value })}
       />
       <Field
-        id={`dshgc-site-${props.id}-ref`} label="token 引用名" text={props.draft.tokenRef}
-        disabled={props.busy} hint={TOKEN_REF_HELP} problem={refProblem}
-        onEdit={value => props.onChange({ tokenRef: value })}
-      />
-      <Field
-        id={`dshgc-site-${props.id}-token`} label="token 值" type="password" text={props.draft.token}
-        disabled={props.busy} problem={null}
-        hint={configured ? '已配置；留空表示保持当前值不变' : '尚未配置；填写后随「保存」一起写入'}
+        t={props.t} id={`dshgc-site-${props.id}-token`} label={props.t('token')} type="password"
+        text={props.draft.token} disabled={props.busy} problem={null}
+        hint={configured ? props.t('hintTokenKeep') : props.t('hintTokenSet')}
         onEdit={value => props.onChange({ token: value })}
         head={(
           <>
-            <StatusTag configured={configured} />
+            <StatusTag t={props.t} configured={configured} />
             {configured && (
-              <Button size="sm" danger disabled={props.busy} onClick={props.onClearToken}>清除 Token</Button>
+              <Button size="sm" danger disabled={props.busy} onClick={props.onClearToken}>
+                {props.t('clearToken')}
+              </Button>
             )}
           </>
         )}
       />
       <Field
-        id={`dshgc-site-${props.id}-project`} label="默认项目（可选）" text={props.draft.defaultProject}
-        disabled={props.busy} problem={null} hint="工具调用未传 project 时使用"
+        t={props.t} id={`dshgc-site-${props.id}-project`} label={props.t('labelDefaultProject')}
+        text={props.draft.defaultProject} disabled={props.busy} problem={null}
+        hint={props.t('hintDefaultProject')}
         onEdit={value => props.onChange({ defaultProject: value })}
       />
       <div className="dshgc-actions dshgc-actionsEnd dshgc-divider">
-        <Button size="sm" danger disabled={props.busy} onClick={props.onDelete}>删除站点</Button>
+        <Button size="sm" danger disabled={props.busy} onClick={props.onDelete}>{props.t('delete')}</Button>
         <span className="dshgc-spacer" />
-        <Button size="sm" disabled={props.busy} onClick={props.onCancel}>取消</Button>
-        <Button
-          variant="primary" disabled={props.busy || urlProblem !== null || refProblem !== null}
-          onClick={props.onSave}
-        >保存</Button>
+        <Button size="sm" disabled={props.busy} onClick={props.onCancel}>{props.t('cancel')}</Button>
+        <Button variant="primary" disabled={props.busy || urlProblem !== null} onClick={props.onSave}>
+          {props.t('save')}
+        </Button>
       </div>
     </>
   )
@@ -478,12 +462,13 @@ function SiteEditor(props: {
  * shows the problem when there is one and the hint otherwise.
  */
 function Field(props: {
+  t: PanelTranslate
   id: string
   label: string
   text: string
   disabled: boolean
   hint: string
-  problem: string | null
+  problem: SiteProblemKey | null
   onEdit: (text: string) => void
   placeholder?: string
   type?: 'text' | 'password'
@@ -514,7 +499,7 @@ function Field(props: {
         className={props.problem === null ? 'dshgc-hint' : 'dshgc-invalid'}
         {...props.problem === null ? {} : { role: 'status' }}
       >
-        {props.problem ?? props.hint}
+        {props.problem === null ? props.hint : props.t(props.problem)}
       </p>
     </div>
   )
@@ -522,6 +507,7 @@ function Field(props: {
 
 /** The provider picker, laid out on the same rhythm as every other field. */
 function ProviderField(props: {
+  t: PanelTranslate
   id: string
   value: ProviderId
   disabled: boolean
@@ -530,7 +516,7 @@ function ProviderField(props: {
   return (
     <div className="dshgc-field">
       <div className="dshgc-fieldHead">
-        <label className="dshgc-label" htmlFor={props.id}>提供方</label>
+        <label className="dshgc-label" htmlFor={props.id}>{props.t('provider')}</label>
       </div>
       <select
         id={props.id}
@@ -547,11 +533,11 @@ function ProviderField(props: {
   )
 }
 
-/** Whether one token reference is configured, as a status capsule. */
-function StatusTag(props: { configured: boolean }): ReactNode {
+/** Whether the site's token is configured, as a status capsule. */
+function StatusTag(props: { t: PanelTranslate; configured: boolean }): ReactNode {
   return (
     <span className={props.configured ? 'dshgc-tag dshgc-tagOk' : 'dshgc-tag dshgc-tagWarn'}>
-      {props.configured ? 'token 已配置' : 'token 未配置'}
+      {props.configured ? props.t('tokenConfigured') : props.t('tokenMissing')}
     </span>
   )
 }

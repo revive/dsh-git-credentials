@@ -7,7 +7,7 @@
 
 An out-of-tree plugin for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) that manages GitLab, GitHub, Gitee, Gitea, and Bitbucket API tokens so **token values never enter the model context**.
 
-The model's tools carry only a token *reference name* (e.g. `GITLAB_TOKEN`); the value is decrypted from the plugin's own encrypted store at call time and appears only in the outgoing HTTP `Authorization` header. Changing a site or rotating a token takes effect on the very next call — no restart required.
+The model's tools carry only a *site id* (e.g. `corp`); that site's token is decrypted from the plugin's own encrypted store at call time and appears only in the outgoing HTTP `Authorization` header. Changing a site or rotating its token takes effect on the very next call — no restart required.
 
 ## Features
 
@@ -27,7 +27,7 @@ This plugin earns its place where MCP servers don't cover the gap:
 | | Official GitHub MCP | This plugin |
 |---|---|---|
 | Forges | GitHub only (GitLab has an official server; Gitee / Gitea / Bitbucket rely on third-party servers of varying quality and maintenance) | One encrypted store, one settings panel, one tool set for GitLab, GitHub, Gitee, Gitea, and Bitbucket — including self-hosted Gitea / GitLab |
-| Token handling | Plaintext environment variables per server, no management UI | AES-256-GCM encrypted storage, token reference names, settings-page management; token values never enter the model context |
+| Token handling | Plaintext environment variables per server, no management UI | AES-256-GCM encrypted storage, one token per site, settings-page management; token values never enter the model context |
 | Integration | Extra MCP proxy process | Tools register directly in the harness tool registry |
 
 Use the MCP route for a single hosted forge with standard token handling; use this plugin for multi-forge setups (especially Gitee or self-hosted Gitea), or when you want encrypted storage plus an in-product management page.
@@ -94,8 +94,10 @@ The HMR watcher monitors the home layer: adding the row hot-mounts the plugin in
 
 Manage sites and tokens in **Settings → Git Credentials**:
 
-- **Add a site**: the form sits in its own **Add site** card below the configured list, with site id, provider (GitLab / GitHub / Gitee / Gitea / Bitbucket), API base URL (defaults per provider: `https://api.github.com`, `https://gitee.com/api/v5`, `https://api.bitbucket.org/2.0`; GitLab and Gitea are self-hosted and need their own address, e.g. `https://gitlab.example.com` / `https://gitea.example.com/api/v1`), token reference name (defaults to `GITLAB_TOKEN` / `GITHUB_TOKEN` / `GITEE_TOKEN` / `GITEA_TOKEN` / `BITBUCKET_TOKEN`), optional token value, and an optional default project. One **Save** writes the site and the token together; the field rules (site id charset, token reference charset, http(s) base URL) appear as field help, and an invalid draft says what is wrong and disables Save instead of failing server-side
-- **Each configured site**: read-only by default (provider, base URL, token reference, default project, configured state) in its own card, with **Edit** and **Delete site**; edit mode reveals the inputs plus **Save / Cancel**, saves the fields and a newly typed token value in one action, and offers **Clear token** beside the token field
+- **Add a site**: the form sits in its own **Add site** card below the configured list, with site id, provider (GitLab / GitHub / Gitee / Gitea / Bitbucket), API base URL (defaults per provider: `https://api.github.com`, `https://gitee.com/api/v5`, `https://api.bitbucket.org/2.0`; GitLab and Gitea are self-hosted and need their own address, e.g. `https://gitlab.example.com` / `https://gitea.example.com/api/v1`), the site's token, and an optional default project. One **Save** writes the site and its token together; the field rules (site id charset, http(s) base URL) appear as field help, and an invalid draft says what is wrong and disables Save instead of failing server-side
+- **Each configured site**: read-only by default (provider, base URL, default project, token state) in its own card, with **Edit** and **Delete site**; edit mode reveals the inputs plus **Save / Cancel**, saves the fields and a newly typed token in one action, and offers **Clear token** beside the token field. Deleting a site deletes its token with it
+- **One site, one token**: a token belongs to the site it was saved with, so it can neither outlive its site nor be shared by accident
+- The panel follows the Harness UI language: its copy and its navigation label are registered in Chinese and English through the client locale service
 - The panel talks to same-origin `/git-credentials-admin/*` JSON endpoints; token values never appear in any response
 - All changes take effect immediately — every tool call reads a fresh decrypted snapshot
 
@@ -136,14 +138,14 @@ One resource tool per provider, with an `action` parameter selecting the operati
 - `file` always reads: `project`, `path`, `ref?` (defaults to the repository default branch; content over the byte cap is truncated and flagged)
 - `bitbucket_repos` create needs the site's `defaultProject` (`workspace/repo`) to know which workspace to create in
 - Bitbucket has no releases API, so no `bitbucket_releases` tool; release delete uses the release `number` (GitLab deletes by `tag`)
-- Token reference names are POSIX identifiers (`GITLAB_TOKEN`, `GITHUB_TOKEN`, `GITEE_TOKEN`, `GITEA_TOKEN`, `BITBUCKET_TOKEN`, …); multiple sites can share one reference or use their own
+- One site owns exactly one token, stored under the site id: deleting a site deletes its token, and a token cannot be shared between sites. A store written by an earlier version (where sites named a shared token reference) is migrated on read — each site's referenced value becomes its own token, and reference keys no site used are dropped
 - GitLab authenticates with the `PRIVATE-TOKEN` header; GitHub, Gitee, and Bitbucket with `Authorization: Bearer` (Gitee additionally falls back to the `access_token` URL parameter when the header form is rejected); Gitea with `Authorization: token`
 - HTTP goes through Node's built-in `fetch` directly — `ctx.web.fetch` is deliberately not used (URL-only, no header support)
 ## How it works
 
 ```
 ~/.dsh/git-credentials.json (AES-256-GCM encrypted: sites + token values)
-  → tool execution decrypts one snapshot, filters sites by provider, resolves tokenRef
+  → tool execution decrypts one snapshot, filters sites by provider, reads the site's own token
   → fetch(baseUrl/<provider api path>, { headers: { PRIVATE-TOKEN | Bearer | token } })
   → tool arguments/returns/errors carry only business data (site, project, path, …)
 ```
@@ -154,7 +156,7 @@ Prerequisites: a clone of [deepseek-harness](https://github.com/deepseek-ai/deep
 
 The browser half targets the current client slot standard: the panel is a `settings.section` list entry whose component receives the composed section props, and the typecheck program pulls the slot contracts through type-only imports. Typecheck against the checkout you actually run — regenerate `tsconfig.json` after switching harness versions. A checkout that has not built its client face yet falls back to those packages' sources; if the report names errors inside `packages/.../src`, build the face first with `pnpm run build:lib:client` in the checkout and typecheck again.
 
-**The panel brings its own controls.** `src/client/panel-css.ts` copies the control metrics, focus behavior, and list rhythm of the host pages the panel sits beside, renamed under a `dshgc-` prefix, and the only thing shared with the host is the `--dsw-*` theme tokens — so light and dark follow automatically. Harness Client packages (such as `@deepseek-ai/dsh-client-ui-primitives`) are deliberately **not** imported as modules: they change without notice, and a throwing component blanks the slot entry. `dsh.client.inject` entries only order activation and remain allowed.
+**The panel brings its own controls and its own copy.** `src/client/panel-css.ts` copies the control metrics, focus behavior, and list rhythm of the host pages the panel sits beside, renamed under a `dshgc-` prefix, and the only thing shared with the host is the `--dsw-*` theme tokens — so light and dark follow automatically. Harness Client packages (such as `@deepseek-ai/dsh-client-ui-primitives`) are deliberately **not** imported as modules: they change without notice, and a throwing component blanks the slot entry. `dsh.client.inject` entries only order activation and remain allowed. All visible text is registered through the client locale service (`src/client/locales.ts`, Chinese and English) and reached through the framework-injected `t` of the section registration, so the panel and its navigation label follow the Harness UI language.
 
 **Harness compatibility is enforced from the manifest.** DSH reads this package's `peerDependencies` on `@deepseek-ai/dsh` and `@deepseek-ai/dsh-*` and refuses to apply the bundle layer unless every range matches the running harness version (prereleases included); a refused bundle contributes no tools and no settings page, and the harness reports the refused peers. The `@deepseek-ai/dsh-tools` range is deliberately wide — `>=0.1.7-rc.1 <1.0.0` — so that a harness bump inside the 0.x line never refuses the bundle on its own (harness packages version in lockstep with the product). A new harness release is therefore handled as: regenerate `tsconfig.json`, `pnpm typecheck`, `pnpm smoke`; touch the range only when one of those actually fails, and treat `<1.0.0` as the re-validation boundary. Verify a package against a checkout without installing it — the check itself takes only the manifest:
 

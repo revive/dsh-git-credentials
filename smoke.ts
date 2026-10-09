@@ -22,7 +22,7 @@ import { GitHubClient } from './src/github.ts'
 import { GiteeClient } from './src/gitee.ts'
 import { GiteaClient } from './src/gitea.ts'
 import { BitbucketClient } from './src/bitbucket.ts'
-import { GitStore, refOf } from './src/store.ts'
+import { GitStore, normalizeState, type StoreState } from './src/store.ts'
 
 // The harness checkout comes from the environment, never from a baked-in
 // machine path. The plugin root is derived from this script's own location.
@@ -71,21 +71,21 @@ const store = GitStore.create({ dataPath, keyPath })
 store.write({
   defaultSite: 'corp',
   sites: {
-    corp: { provider: 'gitlab', baseUrl: 'https://gitlab.example.com', tokenRef: 'GITLAB_SMOKE_TOKEN' },
-    gh: { provider: 'github', baseUrl: 'https://api.github.com', tokenRef: 'GITHUB_SMOKE_TOKEN' },
-    ge: { provider: 'gitee', baseUrl: 'https://gitee.com/api/v5', tokenRef: 'GITEE_SMOKE_TOKEN' },
+    corp: { provider: 'gitlab', baseUrl: 'https://gitlab.example.com' },
+    gh: { provider: 'github', baseUrl: 'https://api.github.com' },
+    ge: { provider: 'gitee', baseUrl: 'https://gitee.com/api/v5' },
   },
   tokens: {
-    GITLAB_SMOKE_TOKEN: 'glpat-smoke-secret',
-    GITHUB_SMOKE_TOKEN: 'ghp-smoke-secret',
-    GITEE_SMOKE_TOKEN: 'gitee-smoke-secret',
+    corp: 'glpat-smoke-secret',
+    gh: 'ghp-smoke-secret',
+    ge: 'gitee-smoke-secret',
   },
 })
 const roundTrip = store.read()
 if (roundTrip.sites.corp?.provider !== 'gitlab' || roundTrip.sites.gh?.provider !== 'github'
   || roundTrip.sites.ge?.provider !== 'gitee'
-  || roundTrip.tokens['GITHUB_SMOKE_TOKEN'] !== 'ghp-smoke-secret'
-  || roundTrip.tokens['GITEE_SMOKE_TOKEN'] !== 'gitee-smoke-secret') {
+  || roundTrip.tokens.gh !== 'ghp-smoke-secret'
+  || roundTrip.tokens.ge !== 'gitee-smoke-secret') {
   throw new Error(`store round-trip mismatch: ${JSON.stringify(roundTrip)}`)
 }
 const onDisk = readFileSync(dataPath, 'utf8')
@@ -96,6 +96,31 @@ if (!onDisk.includes('"cipher":"aes-256-gcm"')) {
   throw new Error('store data file is not the encrypted envelope')
 }
 console.log('ok: encrypted store round-trips with ciphertext at rest')
+
+// A document written before sites owned their tokens migrates on read: the
+// referenced value lands on the site id, `tokenRef` disappears, and a reference
+// that no site used is not carried over.
+const legacyDir = join(process.env.DSH_HOME, 'store-legacy')
+mkdirSync(legacyDir, { recursive: true })
+const legacy = GitStore.create({ dataPath: join(legacyDir, 'data.json'), keyPath: join(legacyDir, 'key.bin') })
+const legacyDocument: Record<string, unknown> = {
+  defaultSite: 'corp',
+  sites: { corp: { provider: 'gitlab', baseUrl: 'https://gitlab.example.com', tokenRef: 'GITLAB_TOKEN' } },
+  tokens: { GITLAB_TOKEN: 'glpat-legacy', ORPHAN_TOKEN: 'orphan-secret' },
+}
+legacy.write(legacyDocument as unknown as StoreState)
+const migrated = legacy.read()
+if (migrated.sites.corp === undefined || 'tokenRef' in migrated.sites.corp
+  || migrated.tokens.corp !== 'glpat-legacy') {
+  throw new Error(`legacy store was not migrated: ${JSON.stringify(migrated)}`)
+}
+if ('GITLAB_TOKEN' in migrated.tokens || 'ORPHAN_TOKEN' in migrated.tokens) {
+  throw new Error(`legacy reference keys survived migration: ${JSON.stringify(migrated.tokens)}`)
+}
+if (normalizeState({ sites: {}, tokens: {} }).tokens['anything'] !== undefined) {
+  throw new Error('normalizeState invented a token')
+}
+console.log('ok: a legacy tokenRef document migrates to one token per site')
 
 const ctx = await boot('gitlab-smoke', rootConfig, [
   ...loadOverlayPatches('gitlab-smoke', join(REPO, 'packages/bundle/base/cordis.patch.yml')),
@@ -200,7 +225,6 @@ try {
   const bare = new GitLabClient({}, {
     id: 'smoke',
     baseUrl: 'https://gitlab.example.com',
-    tokenRef: refOf('GITLAB_NOT_CONFIGURED'),
   })
   let failed = false
   try {
@@ -208,7 +232,7 @@ try {
   } catch (error) {
     failed = true
     const message = error instanceof Error ? error.message : String(error)
-    if (!message.includes('GITLAB_NOT_CONFIGURED') || !message.includes('not configured')) {
+    if (!message.includes('smoke') || !message.includes('no token is configured')) {
       throw new Error(`unexpected failure text: ${message}`)
     }
   }
