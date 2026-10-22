@@ -10,6 +10,22 @@ to users as the release notes.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-22
+
+### Added
+
+- `gitlab_projects` create takes a `namespace`: a group's full path (for example `pandax` or
+  `team/sub`) or its numeric id is resolved through `GET /groups/:id` and sent as `namespace_id`, so a
+  project can be created inside a group instead of only under the token owner. Omitting the argument
+  keeps the previous behavior, and the other providers still create under the token owner (Bitbucket:
+  the workspace from the site's `defaultProject`).
+
+### Changed
+
+- GitLab project listings report the full path (`group/project`) in `path`, matching every other
+  provider and the value create already returned, so a listed project can be passed straight back to
+  the project-taking tools.
+
 ## [0.5.0] - 2026-10-09
 
 ### Added

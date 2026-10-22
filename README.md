@@ -107,7 +107,7 @@ One resource tool per provider, with an `action` parameter selecting the operati
 
 | Tool | `action` | Parameters |
 |---|---|---|
-| `gitlab_projects` | `list`, `create` | list: `search?`, `membership?`, `perPage?` · create: `name`, `description?`, `path?`, `visibility?` |
+| `gitlab_projects` | `list`, `create` | list: `search?`, `membership?`, `perPage?` · create: `name`, `namespace?`, `description?`, `path?`, `visibility?` |
 | `gitlab_file` | `read` | `project`, `path`, `ref?` |
 | `gitlab_merge_requests` | `list`, `get`, `create`, `merge`, `close` | `project?`, `state?`, `perPage?`, `number`, `title`, `sourceBranch`, `targetBranch`, `body?` |
 | `gitlab_issues` | `list`, `get`, `create`, `close`, `reopen`, `comment` | `project?`, `state?`, `perPage?`, `number`, `title`, `body?` |
@@ -137,6 +137,7 @@ One resource tool per provider, with an `action` parameter selecting the operati
 - `state` values: GitLab `opened`/`closed`/`all` (`merged` for MRs), the others `open`/`closed`/`all`
 - `file` always reads: `project`, `path`, `ref?` (defaults to the repository default branch; content over the byte cap is truncated and flagged)
 - `bitbucket_repos` create needs the site's `defaultProject` (`workspace/repo`) to know which workspace to create in
+- `gitlab_projects` create takes `namespace` (a group's full path such as `pandax` or `team/sub`, or its numeric id); the client resolves it to `namespace_id` before `POST /projects`. Omit it to create under the token owner. This is the only create that can choose an owner — every other provider's create lands under the token owner (Bitbucket: the `defaultProject` workspace)
 - Bitbucket has no releases API, so no `bitbucket_releases` tool; release delete uses the release `number` (GitLab deletes by `tag`)
 - One site owns exactly one token, stored under the site id: deleting a site deletes its token, and a token cannot be shared between sites. A store written by an earlier version (where sites named a shared token reference) is migrated on read — each site's referenced value becomes its own token, and reference keys no site used are dropped
 - GitLab authenticates with the `PRIVATE-TOKEN` header; GitHub, Gitee, and Bitbucket with `Authorization: Bearer` (Gitee additionally falls back to the `access_token` URL parameter when the header form is rejected); Gitea with `Authorization: token`

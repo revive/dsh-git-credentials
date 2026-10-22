@@ -56,6 +56,7 @@ export type IssueState = 'opened' | 'closed' | 'all'
 interface RawProject {
   readonly id: number
   readonly path: string
+  readonly path_with_namespace?: string
   readonly name: string
   readonly web_url: string
   readonly visibility: string
@@ -123,7 +124,7 @@ export class GitLabClient {
     })
     return raw.map(project => ({
       id: project.id,
-      path: project.path,
+      path: project.path_with_namespace ?? project.path,
       name: project.name,
       webUrl: project.web_url,
       visibility: project.visibility,
@@ -304,21 +305,28 @@ export class GitLabClient {
   }
 
   /**
-   * Create a project under the token owner (write operation).
-   * @param options - name, optional path/description/visibility, cancellation.
+   * Create a project under the token owner, or inside one group when a
+   * namespace is given (write operation). GitLab's create endpoint takes a
+   * numeric `namespace_id`, so a group path is resolved first.
+   * @param options - name, optional namespace/path/description/visibility, cancellation.
    * @returns the created project summary (canonical project shape).
    */
   async createRepo(options: {
     readonly name: string
+    readonly namespace?: string
     readonly path?: string
     readonly description?: string
     readonly visibility?: 'private' | 'internal' | 'public'
     readonly signal?: AbortSignal
   }): Promise<GitLabProject> {
+    const namespaceId = options.namespace === undefined
+      ? undefined
+      : await this.resolveNamespace(options.namespace, options.signal)
     const raw = await this.post<RawProject>(
       '/projects',
       {
         name: options.name,
+        ...namespaceId === undefined ? {} : { namespace_id: namespaceId },
         ...options.path === undefined ? {} : { path: options.path },
         ...options.description === undefined ? {} : { description: options.description },
         ...options.visibility === undefined ? {} : { visibility: options.visibility },
@@ -326,6 +334,29 @@ export class GitLabClient {
       options.signal,
     )
     return mapProject(raw)
+  }
+
+  /**
+   * Resolve a namespace argument to the numeric group id `POST /projects`
+   * takes as `namespace_id`. GitLab's group endpoint accepts either a numeric
+   * id or a URL-encoded full path, so both forms a caller may already know
+   * work; a path the token cannot see fails with the resolution context.
+   * @param namespace - group full path (e.g. "pandax" or "team/sub") or numeric id.
+   * @param signal - cancellation.
+   * @returns the group's numeric id.
+   */
+  private async resolveNamespace(namespace: string, signal?: AbortSignal): Promise<number> {
+    try {
+      const group = await this.get<{ readonly id: number }>(
+        `/groups/${encodeURIComponent(namespace)}`,
+        { ...signal === undefined ? {} : { signal } },
+      )
+      return group.id
+    } catch (error) {
+      throw new Error(
+        `GitLab site "${this.site.id}": cannot resolve namespace "${namespace}" to a group: ${errorMessage(error)}`,
+      )
+    }
   }
 
   /**
@@ -619,8 +650,8 @@ export class GitLabClient {
 
 
 
-/** Map one raw project to the canonical summary; POST /projects reports path_with_namespace. */
-function mapProject(project: RawProject & { readonly path_with_namespace?: string }): GitLabProject {
+/** Map one raw project to the canonical summary; GitLab reports path_with_namespace on both list and create. */
+function mapProject(project: RawProject): GitLabProject {
   return {
     id: project.id,
     path: project.path_with_namespace ?? project.path,

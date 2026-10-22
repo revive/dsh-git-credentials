@@ -107,7 +107,7 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 
 | 工具 | `action` | 参数 |
 |---|---|---|
-| `gitlab_projects` | `list`、`create` | list: `search?`、`membership?`、`perPage?` · create: `name`、`description?`、`path?`、`visibility?` |
+| `gitlab_projects` | `list`、`create` | list: `search?`、`membership?`、`perPage?` · create: `name`、`namespace?`、`description?`、`path?`、`visibility?` |
 | `gitlab_file` | `read` | `project`、`path`、`ref?` |
 | `gitlab_merge_requests` | `list`、`get`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`sourceBranch`、`targetBranch`、`body?` |
 | `gitlab_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
@@ -137,6 +137,7 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 - `state` 取值：GitLab `opened`/`closed`/`all`（MR 另有 `merged`），其余平台 `open`/`closed`/`all`
 - `file` 恒为读取：`project`、`path`、`ref?`（默认分支；超过字节上限截断并标记）
 - `bitbucket_repos` 的 create 需要站点 `defaultProject`（`workspace/repo`）才能确定 workspace
+- `gitlab_projects` 的 create 可传 `namespace`（组的完整路径，如 `pandax` 或 `team/sub`，或组的数字 id）：客户端先把它解析成 `namespace_id` 再 `POST /projects`；不传则建在 token 所有者名下。这是唯一能指定归属的 create——其他平台的 create 始终落在 token 所有者名下（Bitbucket 为 `defaultProject` 的 workspace）
 - Bitbucket 没有 releases API，因此没有 `bitbucket_releases` 工具；release 的 delete 用 release `number`（GitLab 按 `tag` 删除）
 - 一个站点恰好拥有一个 token，以站点 id 为键存储：删除站点会连同 token 一起删除，token 也不会在站点之间共享。旧版本写下的存储（站点通过引用名共享 token）会在读取时自动迁移——每个站点引用到的值成为它自己的 token，没有任何站点引用的引用名会被丢弃
 - GitLab 用 `PRIVATE-TOKEN` 头；GitHub、Gitee、Bitbucket 用 `Authorization: Bearer`（Gitee 在头被拒绝时自动兜底 `access_token` URL 参数）；Gitea 用 `Authorization: token`

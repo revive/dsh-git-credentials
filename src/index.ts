@@ -479,7 +479,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
     ctx.tools.register(defineTool({
       name: named(reposKind),
-      description: `List/search or create ${label} ${reposKind}. action "list" lists or searches (search?, perPage?${spec.gitlabExtras === true ? ', membership?' : ''}); action "create" creates one (name, description?${spec.gitlabExtras === true ? ', path?, visibility?' : ', private?'}) — the token is injected per site.${SITE_DESCRIPTION}`,
+      description: `List/search or create ${label} ${reposKind}. action "list" lists or searches (search?, perPage?${spec.gitlabExtras === true ? ', membership?' : ''}); action "create" creates one (name, ${spec.gitlabExtras === true ? 'namespace?, ' : ''}description?${spec.gitlabExtras === true ? ', path?, visibility?' : ', private?'}) — the token is injected per site.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
         action: {
@@ -495,6 +495,10 @@ export function apply(ctx: Context, config: PluginConfig): void {
         description: { type: 'string', description: 'Repository/project description.' },
         ...spec.gitlabExtras === true
           ? {
+            namespace: {
+              type: 'string',
+              description: 'Group to create the project in: its full path (e.g. pandax or team/sub) or numeric id; omit to create under the token owner.',
+            },
             path: { type: 'string', description: 'Project path (defaults to the name).' },
             visibility: {
               type: 'string', enum: ['private', 'internal', 'public'],
@@ -508,10 +512,14 @@ export function apply(ctx: Context, config: PluginConfig): void {
         render: renderRepoAction,
       },
       presentCall(args): GenericCallView {
+        // The approval card names the real target: a group-qualified create
+        // must not read as if it landed in the caller's own namespace.
+        const namespace = (args as { namespace?: string }).namespace
+        const target = args.name === undefined ? '' : namespace === undefined ? args.name : `${namespace}/${args.name}`
         return {
           card: 'generic',
           title: args.action === 'create'
-            ? `Create ${label} ${reposKind.slice(0, -1)} ${args.name ?? ''}`
+            ? `Create ${label} ${reposKind.slice(0, -1)} ${target}`
             : `${label} ${reposKind}${args.search === undefined ? '' : ` matching ${args.search}`}`,
           kind: args.action === 'create' ? 'edit' : 'search',
         }
@@ -520,12 +528,13 @@ export function apply(ctx: Context, config: PluginConfig): void {
         const c = client(args, named(reposKind))
         if (args.action === 'create') {
           const name = needString(args, 'name', named(reposKind))
-          // GitLab spells the create extras path/visibility; the others use private.
+          // GitLab spells the create extras namespace/path/visibility; the others use private.
           const repoInput: Record<string, unknown> = {
             name,
             ...(args.description === undefined ? {} : { description: args.description }),
             ...(spec.gitlabExtras === true
               ? {
+                ...((args as { namespace?: string }).namespace === undefined ? {} : { namespace: (args as { namespace?: string }).namespace }),
                 ...((args as { path?: string }).path === undefined ? {} : { path: (args as { path?: string }).path }),
                 ...((args as { visibility?: string }).visibility === undefined ? {} : { visibility: (args as { visibility?: string }).visibility }),
               }

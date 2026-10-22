@@ -38,9 +38,9 @@ const PLUGIN = fileURLToPath(new URL('.', import.meta.url))
 interface ToolRegistry {
   get(name: string): {
     readonly name: string
-    /** The model-facing argument JSON Schema (only the action enum is read here). */
+    /** The model-facing argument JSON Schema (the action enum and the create parameters are read here). */
     readonly parameters?: {
-      readonly properties?: { readonly action?: { readonly enum?: readonly string[] } }
+      readonly properties?: Record<string, { readonly enum?: readonly string[] }>
     }
     /** The output contract's model-facing projection (rendered for the get layout check). */
     readonly output?: {
@@ -157,6 +157,21 @@ try {
     console.log(`ok: ${name} exposes the get action`)
   }
 
+  // A namespace only GitLab's create takes: the GitLab tool must advertise it,
+  // and the other providers' repo tools must not inherit a GitLab-only knob.
+  {
+    const gitlabProps = tools.get('gitlab_projects')?.parameters?.properties ?? {}
+    if (!('namespace' in gitlabProps)) {
+      throw new Error('gitlab_projects does not advertise the namespace create parameter')
+    }
+    for (const name of ['github_repos', 'gitee_repos', 'gitea_repos', 'bitbucket_repos']) {
+      if ('namespace' in (tools.get(name)?.parameters?.properties ?? {})) {
+        throw new Error(`${name} must not advertise GitLab's namespace parameter`)
+      }
+    }
+    console.log('ok: namespace is a GitLab-only create parameter')
+  }
+
   // The get read must render as ONE newline-separated block: the result
   // pipeline concatenates separate content blocks without a separator, which
   // ran the title into the author line before.
@@ -238,6 +253,62 @@ try {
   }
   if (!failed) throw new Error('listRepos must fail loud without a configured token')
   console.log('ok: unconfigured token fails loud with a clear message')
+
+  // GitLab's create takes a numeric namespace_id, so a group path must be
+  // looked up first and the POST must carry the resolved id. The stub below
+  // keeps this keyless and network-free while exercising both requests.
+  {
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      calls.push({
+        url,
+        method: init?.method ?? 'GET',
+        ...init?.body === undefined ? {} : { body: JSON.parse(String(init.body)) as Record<string, unknown> },
+      })
+      const payload = url.includes('/api/v4/groups/')
+        ? { id: 42, full_path: 'pandax' }
+        : {
+          id: 7,
+          path: 'pandax-site',
+          path_with_namespace: 'pandax/pandax-site',
+          name: 'pandax-site',
+          web_url: 'https://gitlab.example.com/pandax/pandax-site',
+          visibility: 'private',
+        }
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as typeof fetch
+    try {
+      const client = new GitLabClient({ corp: 'glpat-x' }, {
+        id: 'corp',
+        baseUrl: 'https://gitlab.example.com',
+      })
+      const created = await client.createRepo({ name: 'pandax-site', namespace: 'pandax', visibility: 'private' })
+      const lookup = calls[0]
+      const create = calls[1]
+      if (lookup === undefined || lookup.method !== 'GET' || !lookup.url.endsWith('/api/v4/groups/pandax')) {
+        throw new Error(`namespace lookup did not target the group endpoint: ${JSON.stringify(calls)}`)
+      }
+      if (create === undefined || create.method !== 'POST' || create.body?.namespace_id !== 42) {
+        throw new Error(`create did not carry the resolved namespace_id: ${JSON.stringify(calls)}`)
+      }
+      if (created.path !== 'pandax/pandax-site') {
+        throw new Error(`created project did not report its full path: ${JSON.stringify(created)}`)
+      }
+      calls.length = 0
+      await client.createRepo({ name: 'mine' })
+      if (calls.length !== 1 || calls[0]?.body?.namespace_id !== undefined) {
+        throw new Error(`a create without namespace must not resolve or send one: ${JSON.stringify(calls)}`)
+      }
+      console.log('ok: a GitLab namespace resolves to namespace_id before create')
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  }
 
   console.log('SMOKE OK')
 } finally {
