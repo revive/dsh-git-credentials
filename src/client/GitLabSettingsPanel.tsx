@@ -26,8 +26,8 @@ import { adminGet, adminWrite } from './admin-api.ts'
 import type { AdminSite, AdminState, AdminToken, ProviderId } from './admin-api.ts'
 import type { GitCredentialsKey } from './locales.ts'
 import {
-  BASE_URL_PLACEHOLDERS, DEFAULT_BASE_URLS, PROVIDER_LABELS, PROVIDER_ORDER,
-  baseUrlProblem, isStockBaseUrl, siteIdProblem, type SiteProblemKey,
+  BASE_URL_PLACEHOLDERS, DEFAULT_BASE_URLS, PROVIDER_LABELS, PROVIDER_ORDER, TOKEN_SCOPES,
+  baseUrlProblem, isStockBaseUrl, siteIdProblem, tokenUrlFor, type SiteProblemKey,
 } from './site-model.ts'
 import { PANEL_CSS } from './panel-css.ts'
 
@@ -328,7 +328,8 @@ function Loaded({ t }: { t: PanelTranslate }): ReactNode {
         />
         <Field
           t={t} id="dshgc-add-token" label={t('token')} type="password" text={add.token} disabled={busy}
-          hint={t('hintTokenAdd')} problem={null}
+          hint={withScope(t, add.provider, t('hintTokenAdd'))} problem={null}
+          head={<TokenLink t={t} provider={add.provider} baseUrl={add.baseUrl} />}
           onEdit={value => editAdd({ token: value })}
         />
         <Field
@@ -426,11 +427,12 @@ function SiteEditor(props: {
       <Field
         t={props.t} id={`dshgc-site-${props.id}-token`} label={props.t('token')} type="password"
         text={props.draft.token} disabled={props.busy} problem={null}
-        hint={configured ? props.t('hintTokenKeep') : props.t('hintTokenSet')}
+        hint={configured ? props.t('hintTokenKeep') : withScope(props.t, props.draft.provider, props.t('hintTokenSet'))}
         onEdit={value => props.onChange({ token: value })}
         head={(
           <>
             <StatusTag t={props.t} configured={configured} />
+            <TokenLink t={props.t} provider={props.draft.provider} baseUrl={props.draft.baseUrl} />
             {configured && (
               <Button size="sm" danger disabled={props.busy} onClick={props.onClearToken}>
                 {props.t('clearToken')}
@@ -539,6 +541,28 @@ function StatusTag(props: { t: PanelTranslate; configured: boolean }): ReactNode
     <span className={props.configured ? 'dshgc-tag dshgc-tagOk' : 'dshgc-tag dshgc-tagWarn'}>
       {props.configured ? props.t('tokenConfigured') : props.t('tokenMissing')}
     </span>
+  )
+}
+
+/** The token field's hint line with the provider's minimum permissions appended. */
+function withScope(t: PanelTranslate, provider: ProviderId, hint: string): string {
+  const scope = TOKEN_SCOPES[provider]
+  return scope === undefined ? hint : `${hint} · ${t('hintScope', { scope })}`
+}
+
+/**
+ * A deep link to the selected provider's token-creation page, rendered beside
+ * the token field's label. The URL is derived locally from the provider and
+ * the draft API base URL; when it cannot be derived safely the link is absent
+ * rather than wrong.
+ */
+function TokenLink(props: { t: PanelTranslate; provider: ProviderId; baseUrl: string }): ReactNode {
+  const href = tokenUrlFor(props.provider, props.baseUrl)
+  if (href === undefined) return null
+  return (
+    <a className="dshgc-tokenLink" href={href} target="_blank" rel="noopener noreferrer">
+      {props.t('getToken')}
+    </a>
   )
 }
 

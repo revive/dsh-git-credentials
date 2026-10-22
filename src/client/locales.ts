@@ -24,6 +24,7 @@ export type GitCredentialsKey =
   | 'provider'
   | 'apiUrl'
   | 'token'
+  | 'getToken'
   | 'defaultProject'
   | 'labelDefaultProject'
   | 'save'
@@ -42,6 +43,7 @@ export type GitCredentialsKey =
   | 'hintTokenAdd'
   | 'hintTokenKeep'
   | 'hintTokenSet'
+  | 'hintScope'
   | 'hintDefaultProject'
   | 'problemIdEmpty'
   | 'problemIdCharset'
@@ -69,6 +71,7 @@ export const zh: Record<GitCredentialsKey, string> = {
   provider: '提供方',
   apiUrl: 'API 地址',
   token: 'token',
+  getToken: '获取 token ↗',
   defaultProject: '默认项目',
   labelDefaultProject: '默认项目（可选）',
   save: '保存',
@@ -87,6 +90,7 @@ export const zh: Record<GitCredentialsKey, string> = {
   hintTokenAdd: '留空则稍后再设',
   hintTokenKeep: '留空表示不变',
   hintTokenSet: '尚未设置',
+  hintScope: '建议权限：{scope}',
   hintDefaultProject: '如 owner/repo',
   problemIdEmpty: '请填写站点 id',
   problemIdCharset: '只能用小写字母、数字和连字符，且必须以字母开头',
@@ -115,6 +119,7 @@ export const en: Record<GitCredentialsKey, string> = {
   provider: 'Provider',
   apiUrl: 'API base URL',
   token: 'Token',
+  getToken: 'Get a token ↗',
   defaultProject: 'Default project',
   labelDefaultProject: 'Default project (optional)',
   save: 'Save',
@@ -133,6 +138,7 @@ export const en: Record<GitCredentialsKey, string> = {
   hintTokenAdd: 'Leave empty to set it later',
   hintTokenKeep: 'Leave empty to keep it',
   hintTokenSet: 'Not set yet',
+  hintScope: 'Suggested permissions: {scope}',
   hintDefaultProject: 'e.g. owner/repo',
   problemIdEmpty: 'Enter a site id',
   problemIdCharset: 'Lowercase letters, digits, and hyphens only, starting with a letter',

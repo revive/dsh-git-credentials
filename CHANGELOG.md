@@ -10,6 +10,19 @@ to users as the release notes.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-22
+
+### Added
+
+- The site form's token field links straight to the selected provider's token-creation page:
+  GitHub's fine-grained PAT page with the token name prefilled, Gitee's and Bitbucket's fixed pages,
+  and GitLab's and Gitea's pages derived from the site's API base URL — the link is hidden when that
+  URL is empty or unparseable instead of pointing at the wrong host. While no token is configured the
+  field also states the platform's minimum scopes/permissions (GitHub fine-grained: Contents, Issues,
+  and Pull requests read & write; GitLab `api`; Gitee `projects`; Gitea `repo`; Bitbucket
+  repositories, pull requests, and issues read & write). The links are generated locally and never
+  carry a token. Fixes #2.
+
 ## [0.6.0] - 2026-10-22
 
 ### Added

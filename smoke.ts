@@ -23,6 +23,7 @@ import { GiteeClient } from './src/gitee.ts'
 import { GiteaClient } from './src/gitea.ts'
 import { BitbucketClient } from './src/bitbucket.ts'
 import { GitStore, normalizeState, type StoreState } from './src/store.ts'
+import { TOKEN_SCOPES, tokenUrlFor } from './src/client/site-model.ts'
 
 // The harness checkout comes from the environment, never from a baked-in
 // machine path. The plugin root is derived from this script's own location.
@@ -170,6 +171,49 @@ try {
       }
     }
     console.log('ok: namespace is a GitLab-only create parameter')
+  }
+
+  // The token help links are local strings derived from provider + base URL.
+  // A URL that cannot be parsed must hide the link instead of pointing at the
+  // wrong host, and every provider must state its minimum permissions.
+  {
+    const gitlabLink = 'https://gitlab.example.com/-/user_settings/personal_access_tokens?name=dsh-git-credentials&scopes=api'
+    if (tokenUrlFor('gitlab', 'https://gitlab.example.com/api/v4') !== gitlabLink) {
+      throw new Error(`unexpected GitLab token link for an API root: ${tokenUrlFor('gitlab', 'https://gitlab.example.com/api/v4')}`)
+    }
+    if (tokenUrlFor('gitlab', 'https://gitlab.example.com') !== gitlabLink) {
+      throw new Error('a bare GitLab host must produce the same token link as its /api/v4 root')
+    }
+    if (tokenUrlFor('gitlab', 'https://example.com/gitlab/api/v4')
+      !== 'https://example.com/gitlab/-/user_settings/personal_access_tokens?name=dsh-git-credentials&scopes=api') {
+      throw new Error('a GitLab deployment sub-path must survive into the token link')
+    }
+    if (tokenUrlFor('gitea', 'https://gitea.example.com/api/v1/') !== 'https://gitea.example.com/user/settings/applications') {
+      throw new Error(`unexpected Gitea token link: ${tokenUrlFor('gitea', 'https://gitea.example.com/api/v1/')}`)
+    }
+    if (tokenUrlFor('github', '') !== 'https://github.com/settings/personal-access-tokens/new?name=dsh-git-credentials') {
+      throw new Error(`unexpected GitHub token link: ${tokenUrlFor('github', '')}`)
+    }
+    if (tokenUrlFor('gitee', '') !== 'https://gitee.com/profile/personal_access_tokens'
+      || tokenUrlFor('bitbucket', '') !== 'https://bitbucket.org/account/settings/app-passwords/') {
+      throw new Error('the fixed Gitee/Bitbucket token links changed')
+    }
+    for (const [provider, baseUrl] of [
+      ['gitlab', ''],
+      ['gitlab', 'not a url'],
+      ['gitlab', 'javascript:alert(1)'],
+      ['gitea', 'ftp://gitea.example.com/api/v1'],
+    ] as const) {
+      if (tokenUrlFor(provider, baseUrl) !== undefined) {
+        throw new Error(`a token link must be hidden for ${provider} with base URL ${JSON.stringify(baseUrl)}`)
+      }
+    }
+    for (const provider of ['github', 'gitlab', 'gitee', 'gitea', 'bitbucket'] as const) {
+      if (TOKEN_SCOPES[provider] === undefined) {
+        throw new Error(`provider ${provider} must advertise its minimum token permissions`)
+      }
+    }
+    console.log('ok: token help links derive from the provider and base URL')
   }
 
   // The get read must render as ONE newline-separated block: the result

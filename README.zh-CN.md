@@ -97,6 +97,7 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 - **添加站点**：表单在列表下方独立的「新增站点」卡片里，含站点 id、provider（GitLab / GitHub / Gitee / Gitea / Bitbucket）、API 地址（各 provider 默认值：`https://api.github.com`、`https://gitee.com/api/v5`、`https://api.bitbucket.org/2.0`；GitLab 与 Gitea 是自托管，需自己填地址，如 `https://gitlab.example.com` / `https://gitea.example.com/api/v1`）、该站点的 token 与默认项目（可选）。一个「保存」把站点与 token 一起写入；字段规则（站点 id 字符集、http(s) 地址）直接写在输入框下方，草稿不合法时说明问题并禁用「保存」，不必等服务器报错
 - **每个已保存的站点**：默认在自己的卡片里只读展示（provider、地址、默认项目、token 状态），操作为「编辑」与「删除站点」；编辑态显示各输入框及「保存 / 取消」，一次保存同时提交字段与新填的 token，清除 token 用 token 字段旁的「清除 token」；删除站点会连同它的 token 一起删除
 - **一个站点一个 token**：token 属于保存它的那个站点，既不会比站点活得更久，也不会被误共享
+- **token 帮助**：token 字段旁有「获取 token ↗」直达对应平台的创建页——GitHub 的 fine-grained PAT 页（预填名称）、Gitee 与 Bitbucket 的固定页面、GitLab 与 Gitea 由站点 API 地址推导（地址为空或不合法时隐藏链接）；token 未配置时字段还会写明该平台的最低 scope/权限。链接在本地生成，不携带 token
 - 面板跟随 Harness 的界面语言：文案与导航标题都通过客户端 locale 服务注册了中文与英文
 - 面板通过同源 `/git-credentials-admin/*` JSON 端点读写加密存储；任何响应都不携带 token 值
 - 所有改动即时生效——每次工具调用读一份解密快照

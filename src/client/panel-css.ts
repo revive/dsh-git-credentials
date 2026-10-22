@@ -39,6 +39,9 @@ export const PANEL_CSS = `
 .dshgc-fieldHead{display:flex;align-items:center;gap:8px}
 .dshgc-label{flex:1;min-width:0;font-size:13px;line-height:1.5;font-weight:500;color:var(--dsw-alias-label-primary)}
 .dshgc-hint{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary)}
+.dshgc-tokenLink{font-size:12px;line-height:18px;font-weight:500;color:var(--dsw-alias-link);text-decoration:none;white-space:nowrap}
+.dshgc-tokenLink:hover{text-decoration:underline}
+.dshgc-tokenLink:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary));outline-offset:2px;border-radius:var(--dsw-radius-sm)}
 .dshgc-invalid{margin:0;font-size:12px;line-height:18px;color:var(--dsw-alias-state-error-primary)}
 .dshgc-input,.dshgc-select{box-sizing:border-box;width:100%;height:34px;padding:0 12px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-3);font:inherit;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-primary)}
 .dshgc-input:focus-visible,.dshgc-select:focus-visible{outline:none;border-color:var(--dsw-alias-state-business-primary)}
