@@ -135,6 +135,7 @@ One resource tool per provider, with an `action` parameter selecting the operati
 
 - `action` defaults to the read operation (`list`, or `read` for file) — existing read callers keep working unchanged
 - `number` is the issue/PR number (iid on GitLab); required for `get` / `close` / `reopen` / `comment` / `merge`
+- Gitee issue ids are strings such as `IKRZSO`: `gitee_issues` accepts either an integer or that string for `number`. Gitee creates and updates issues through owner-level endpoints (the client sends `repo` in the body) and keeps the site's `/api/v5` API prefix on every request
 - `state` values: GitLab `opened`/`closed`/`all` (`merged` for MRs), the others `open`/`closed`/`all`
 - `file` always reads: `project`, `path`, `ref?` (defaults to the repository default branch; content over the byte cap is truncated and flagged)
 - `bitbucket_repos` create needs the site's `defaultProject` (`workspace/repo`) to know which workspace to create in

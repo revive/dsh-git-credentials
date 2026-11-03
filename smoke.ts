@@ -41,7 +41,11 @@ interface ToolRegistry {
     readonly name: string
     /** The model-facing argument JSON Schema (the action enum and the create parameters are read here). */
     readonly parameters?: {
-      readonly properties?: Record<string, { readonly enum?: readonly string[] }>
+      readonly properties?: Record<string, {
+        readonly type?: string
+        readonly enum?: readonly string[]
+        readonly oneOf?: readonly unknown[]
+      }>
     }
     /** The output contract's model-facing projection (rendered for the get layout check). */
     readonly output?: {
@@ -171,6 +175,21 @@ try {
       }
     }
     console.log('ok: namespace is a GitLab-only create parameter')
+  }
+
+  // Gitee issue ids are strings: the tool must accept one, while the other
+  // providers keep the integer-only contract.
+  {
+    const giteeNumber = (tools.get('gitee_issues')?.parameters?.properties ?? {}).number
+    if (giteeNumber?.oneOf === undefined) {
+      throw new Error('gitee_issues does not accept string issue ids')
+    }
+    for (const name of ['github_issues', 'gitea_issues', 'bitbucket_issues', 'gitlab_issues']) {
+      if ((tools.get(name)?.parameters?.properties ?? {}).number?.oneOf !== undefined) {
+        throw new Error(`${name} must keep the integer-only number argument`)
+      }
+    }
+    console.log('ok: only Gitee accepts string issue ids')
   }
 
   // The token help links are local strings derived from provider + base URL.
@@ -349,6 +368,115 @@ try {
         throw new Error(`a create without namespace must not resolve or send one: ${JSON.stringify(calls)}`)
       }
       console.log('ok: a GitLab namespace resolves to namespace_id before create')
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  }
+
+  // Gitee keeps its API version in the base URL, creates and updates issues at
+  // the owner level with the repo in the body, and uses string issue ids. The
+  // stub pins every one of those request shapes without touching the network.
+  {
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
+    const realFetch = globalThis.fetch
+    let state = 'open'
+    const issue = (): Record<string, unknown> => ({
+      number: 'IKRZSO',
+      title: 'Gitee issue',
+      state,
+      html_url: 'https://gitee.com/acme/repo/issues/IKRZSO',
+      body: 'Body',
+      labels: [],
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-02T00:00:00Z',
+      user: { login: 'octocat' },
+    })
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? 'GET'
+      const body = init?.body === undefined ? undefined : JSON.parse(String(init.body)) as Record<string, unknown>
+      calls.push({ url, method, ...body === undefined ? {} : { body } })
+      let payload: unknown
+      if (url.includes('/user/repos')) {
+        payload = []
+      } else if (url.includes('/comments')) {
+        payload = { id: 1, user: { login: 'octocat' } }
+      } else if (method === 'PATCH') {
+        state = String(body?.state ?? state)
+        payload = issue()
+      } else if (method === 'POST') {
+        payload = issue()
+      } else if (new URL(url).pathname.endsWith('/issues')) {
+        payload = [issue()]
+      } else {
+        payload = issue()
+      }
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as typeof fetch
+    try {
+      const client = new GiteeClient({ gitee: 'token-x' }, {
+        id: 'gitee',
+        baseUrl: 'https://gitee.com/api/v5',
+      })
+
+      await client.listRepos({ perPage: 1 })
+      if (!(calls[0]?.url.startsWith('https://gitee.com/api/v5/user/repos'))) {
+        throw new Error(`Gitee dropped the /api/v5 prefix: ${calls[0]?.url}`)
+      }
+
+      calls.length = 0
+      await client.listIssues({ project: 'acme/repo', state: 'all' })
+      if (!(calls[0]?.url.includes('state=all'))) {
+        throw new Error(`Gitee list with state "all" omitted the state: ${calls[0]?.url}`)
+      }
+      calls.length = 0
+      await client.listIssues({ project: 'acme/repo' })
+      if (!(calls[0]?.url.includes('state=open'))) {
+        throw new Error(`Gitee list without a state must send "open": ${calls[0]?.url}`)
+      }
+
+      calls.length = 0
+      const created = await client.createIssue({ project: 'acme/repo', title: 'Title', body: 'Body' })
+      const create = calls[0]
+      if (create?.method !== 'POST' || !create.url.endsWith('/api/v5/repos/acme/issues')
+        || create.body?.repo !== 'repo' || create.body?.title !== 'Title' || create.body?.body !== 'Body') {
+        throw new Error(`Gitee create did not use the owner-level endpoint: ${JSON.stringify(calls)}`)
+      }
+      if (created.number !== 'IKRZSO') {
+        throw new Error(`Gitee create lost the string issue id: ${JSON.stringify(created)}`)
+      }
+
+      calls.length = 0
+      const detail = await client.getIssue({ project: 'acme/repo', number: 'IKRZSO', maxBytes: 1024 })
+      if (detail.number !== 'IKRZSO' || !(calls[0]?.url.endsWith('/repos/acme/repo/issues/IKRZSO'))) {
+        throw new Error(`Gitee get did not accept the string id: ${JSON.stringify(calls)}`)
+      }
+
+      calls.length = 0
+      const closed = await client.closeIssue({ project: 'acme/repo', number: 'IKRZSO' })
+      const patch = calls.find(call => call.method === 'PATCH')
+      if (patch === undefined || !patch.url.endsWith('/api/v5/repos/acme/issues/IKRZSO')
+        || patch.body?.repo !== 'repo' || patch.body?.title !== 'Gitee issue' || patch.body?.state !== 'closed') {
+        throw new Error(`Gitee close did not echo repo/title: ${JSON.stringify(calls)}`)
+      }
+      if (closed.state !== 'closed') throw new Error(`Gitee close did not report the new state: ${JSON.stringify(closed)}`)
+      if (calls.filter(call => call.method === 'GET').length !== 2) {
+        throw new Error(`Gitee close must read the current issue and re-read the result: ${JSON.stringify(calls)}`)
+      }
+
+      calls.length = 0
+      const reopened = await client.reopenIssue({ project: 'acme/repo', number: 'IKRZSO' })
+      if (reopened.state !== 'open') throw new Error(`Gitee reopen did not report the new state: ${JSON.stringify(reopened)}`)
+
+      calls.length = 0
+      const comment = await client.commentIssue({ project: 'acme/repo', number: 'IKRZSO', body: 'hi' })
+      if (comment.webUrl !== '') {
+        throw new Error(`Gitee comment without html_url must report an empty webUrl: ${JSON.stringify(comment)}`)
+      }
+      console.log('ok: Gitee preserves /api/v5 and uses owner-level issue writes with string ids')
     } finally {
       globalThis.fetch = realFetch
     }

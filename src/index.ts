@@ -124,6 +124,16 @@ const githubEntrySchema = {
   additionalProperties: false,
 } as const
 
+/** Gitee issue ids are strings (e.g. "IKRZSO"); the same schema accepts older numeric ids. */
+const giteeEntrySchema = {
+  type: 'object',
+  properties: {
+    ...githubEntrySchema.properties,
+    number: { oneOf: [{ type: 'integer' }, { type: 'string' }] },
+  },
+  additionalProperties: false,
+} as const
+
 /** Canonical shape of one GitHub / Gitee / Gitea / Bitbucket pull-request entry (number-keyed). */
 const githubPullSchema = {
   type: 'object',
@@ -166,7 +176,7 @@ const releaseSchema = {
 
 /** One entry as the loop sees it (iid and number are the two key spellings). */
 interface IterationEntry {
-  readonly number?: number
+  readonly number?: number | string
   readonly iid?: number
   readonly title: string
   readonly state: string
@@ -260,7 +270,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
     return value
   }
 
-  /** Throw a loud error unless the argument is a positive integer (issue/PR number). */
+  /** Throw a loud error unless the argument is a positive integer (issue/PR/release number). */
   const needNumber = (args: Record<string, unknown>, tool: string): number => {
     const value = args.number
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
@@ -269,8 +279,23 @@ export function apply(ctx: Context, config: PluginConfig): void {
     return value
   }
 
-  /** The entry id for display (iid on GitLab, number elsewhere). */
-  const entryId = (entry: IterationEntry): number => entry.number ?? entry.iid ?? 0
+  /**
+   * The issue number argument: a positive integer, or a non-empty string id
+   * such as Gitee's "IKRZSO". Only providers whose issue ids are strings use
+   * this.
+   */
+  const needEntryNumber = (
+    args: Record<string, unknown>,
+    tool: string,
+    allowString: boolean,
+  ): number | string => {
+    const value = args.number
+    if (allowString && typeof value === 'string' && value.trim() !== '') return value
+    return needNumber(args, tool)
+  }
+
+  /** The entry id for display (iid on GitLab, number elsewhere; Gitee numbers are strings). */
+  const entryId = (entry: IterationEntry): number | string => entry.number ?? entry.iid ?? 0
 
   /** Render one issues/pulls action result. */
   const renderEntryAction = (label: string, plural: string) =>
@@ -392,7 +417,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
     }): Promise<IterationEntry[]>
     getIssue(options: {
       readonly project?: string
-      readonly number: number
+      readonly number: number | string
       readonly maxBytes: number
       readonly signal?: AbortSignal
     }): Promise<EntryDetail>
@@ -422,9 +447,9 @@ export function apply(ctx: Context, config: PluginConfig): void {
       readonly body?: string
       readonly signal?: AbortSignal
     }): Promise<IterationEntry>
-    closeIssue(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
-    reopenIssue(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
-    commentIssue(options: { readonly project?: string; readonly number: number; readonly body: string; readonly signal?: AbortSignal }): Promise<IterationEntry>
+    closeIssue(options: { readonly project?: string; readonly number: number | string; readonly signal?: AbortSignal }): Promise<IterationEntry>
+    reopenIssue(options: { readonly project?: string; readonly number: number | string; readonly signal?: AbortSignal }): Promise<IterationEntry>
+    commentIssue(options: { readonly project?: string; readonly number: number | string; readonly body: string; readonly signal?: AbortSignal }): Promise<IterationEntry>
     mergePull(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
     closePull(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
     listReleases(options: {
@@ -460,11 +485,13 @@ export function apply(ctx: Context, config: PluginConfig): void {
     /** The pull-request tool's kind name: "merge_requests" (GitLab) or "pull_requests" (others). */
     readonly pullsKind: string
     /** Which entry schema the provider's issues tool emits (list summary + "get" detail). */
-    readonly entrySchema: typeof listEntrySchema | typeof githubEntrySchema
+    readonly entrySchema: typeof listEntrySchema | typeof githubEntrySchema | typeof giteeEntrySchema
     /** Which entry schema the provider's merge/pull-request tool emits (adds the branch pair). */
     readonly pullSchema: typeof listPullSchema | typeof githubPullSchema
     /** The default list state name ("opened" on GitLab, "open" elsewhere). */
     readonly defaultState: string
+    /** Gitee: issue ids are strings, so the number argument/schema accepts one. */
+    readonly stringNumbers?: boolean
     /** GitLab: membership filter on project listing + path/visibility on create. */
     readonly gitlabExtras?: boolean
     /** Whether the platform has a releases API (Bitbucket does not). */
@@ -603,7 +630,12 @@ export function apply(ctx: Context, config: PluginConfig): void {
           description: `Filter by state (${spec.defaultState === 'opened' ? 'opened/closed/all' : 'open/closed/all'}); only for action "list".`,
         },
         perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
-        number: { type: 'integer', description: 'Issue number (required for get/close/reopen/comment).' },
+        number: spec.stringNumbers === true
+          ? {
+            oneOf: [{ type: 'integer' }, { type: 'string' }],
+            description: 'Issue number: a positive integer, or a Gitee issue id such as "IKRZSO" (required for get/close/reopen/comment).',
+          }
+          : { type: 'integer', description: 'Issue number (required for get/close/reopen/comment).' },
         title: { type: 'string', description: 'Issue title (required for create).' },
         body: { type: 'string', description: 'Issue body or comment text (Markdown).' },
       },
@@ -634,7 +666,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
           case 'get':
             return [await c.getIssue({
               ...(args.project === undefined ? {} : { project: args.project }),
-              number: needNumber(args, named('issues')),
+              number: needEntryNumber(args, named('issues'), spec.stringNumbers === true),
               maxBytes: config.fileReadMaxBytes,
               signal: exec.signal,
             })]
@@ -646,13 +678,13 @@ export function apply(ctx: Context, config: PluginConfig): void {
               signal: exec.signal,
             })]
           case 'close':
-            return [await c.closeIssue({ ...(args.project === undefined ? {} : { project: args.project }), number: needNumber(args, named('issues')), signal: exec.signal })]
+            return [await c.closeIssue({ ...(args.project === undefined ? {} : { project: args.project }), number: needEntryNumber(args, named('issues'), spec.stringNumbers === true), signal: exec.signal })]
           case 'reopen':
-            return [await c.reopenIssue({ ...(args.project === undefined ? {} : { project: args.project }), number: needNumber(args, named('issues')), signal: exec.signal })]
+            return [await c.reopenIssue({ ...(args.project === undefined ? {} : { project: args.project }), number: needEntryNumber(args, named('issues'), spec.stringNumbers === true), signal: exec.signal })]
           case 'comment':
             return [await c.commentIssue({
               ...(args.project === undefined ? {} : { project: args.project }),
-              number: needNumber(args, named('issues')),
+              number: needEntryNumber(args, named('issues'), spec.stringNumbers === true),
               body: needString(args, 'body', named('issues')),
               signal: exec.signal,
             })]
@@ -867,9 +899,10 @@ export function apply(ctx: Context, config: PluginConfig): void {
     projectHint: 'owner/repo',
     reposKind: 'repos',
     pullsKind: 'pull_requests',
-    entrySchema: githubEntrySchema,
+    entrySchema: giteeEntrySchema,
     pullSchema: githubPullSchema,
     defaultState: 'open',
+    stringNumbers: true,
   })
   registerForgeTools({
     prefix: 'gitea',

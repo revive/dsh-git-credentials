@@ -10,6 +10,24 @@ to users as the release notes.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-11-03
+
+### Fixed
+
+- Gitee requests keep the site's API base path. Every Gitee call resolved an absolute endpoint path
+  against the base URL, dropping `/api/v5`, so with the default `https://gitee.com/api/v5` every
+  operation answered 404; requests now concatenate the base URL and the endpoint path.
+- Gitee issue creation and state changes use the owner-level endpoints (`POST /repos/{owner}/issues`
+  and `PATCH /repos/{owner}/issues/{number}`) with `repo` in the body — the repo-level paths answered
+  404 `project or enterprise`. Closing/reopening echoes the current title, which Gitee requires, and
+  list requests always send an explicit `state` (including `all`).
+- Gitee issue ids are strings (`IKRZSO`): `gitee_issues` accepts an integer or a string `number`, its
+  output schema accepts either, and list/get/close/reopen/comment work with the string id.
+- Gitee comment responses without `html_url` now report an empty `webUrl` instead of failing output
+  validation.
+
+Fixes #3.
+
 ## [0.6.1] - 2026-10-22
 
 ### Added

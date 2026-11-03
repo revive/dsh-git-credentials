@@ -135,6 +135,7 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 
 - `action` 默认读操作（`list`；file 为 `read`）——现有读调用不受影响
 - `number` 是 issue/PR 编号（GitLab 为 iid）；`get` / `close` / `reopen` / `comment` / `merge` 必需
+- Gitee 的 issue 编号是字符串（如 `IKRZSO`）：`gitee_issues` 的 `number` 同时接受整数和这种字符串。Gitee 的 issue 创建/状态变更走 owner 级端点（客户端在 body 里带 `repo`），并保留站点 API 地址中的 `/api/v5` 前缀
 - `state` 取值：GitLab `opened`/`closed`/`all`（MR 另有 `merged`），其余平台 `open`/`closed`/`all`
 - `file` 恒为读取：`project`、`path`、`ref?`（默认分支；超过字节上限截断并标记）
 - `bitbucket_repos` 的 create 需要站点 `defaultProject`（`workspace/repo`）才能确定 workspace

@@ -20,9 +20,9 @@ export interface GiteeRepo {
   readonly visibility: string
 }
 
-/** One issue or pull request entry. */
+/** One issue or pull request entry. Gitee issue ids are strings such as "IKRZSO". */
 export interface GiteeEntry {
-  readonly number: number
+  readonly number: number | string
   readonly title: string
   readonly state: string
   readonly webUrl: string
@@ -66,7 +66,7 @@ interface RawRepo {
 
 /** Raw issue / pull-request entry. */
 interface RawEntry {
-  readonly number: number
+  readonly number: number | string
   readonly title: string
   readonly state: string
   readonly html_url: string
@@ -180,7 +180,9 @@ export class GiteeClient {
     const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
     const raw = await this.get<RawEntry[]>(`/repos/${owner}/${repo}/issues`, {
       params: {
-        ...options.state === undefined || options.state === 'all' ? {} : { state: options.state },
+        // Gitee's list endpoint needs an explicit state; omitting it is not the
+        // documented default in practice and can yield an empty page.
+        state: options.state ?? 'open',
         per_page: pageSize(options.perPage),
       },
       ...options.signal === undefined ? {} : { signal: options.signal },
@@ -202,7 +204,8 @@ export class GiteeClient {
     const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
     const raw = await this.get<RawEntry[]>(`/repos/${owner}/${repo}/pulls`, {
       params: {
-        ...options.state === undefined || options.state === 'all' ? {} : { state: options.state },
+        // Same explicit-state rule as issues: "all" must be sent, not omitted.
+        state: options.state ?? 'open',
         per_page: pageSize(options.perPage),
       },
       ...options.signal === undefined ? {} : { signal: options.signal },
@@ -217,7 +220,7 @@ export class GiteeClient {
    */
   async getIssue(options: {
     readonly project?: string
-    readonly number: number
+    readonly number: number | string
     readonly maxBytes: number
     readonly signal?: AbortSignal
   }): Promise<GiteeEntryDetail> {
@@ -260,9 +263,11 @@ export class GiteeClient {
     readonly signal?: AbortSignal
   }): Promise<GiteeEntry> {
     const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    // Gitee creates issues at the owner level and takes the repository name in
+    // the body; the repo-scoped path answers 404 "project or enterprise".
     const raw = await this.post<RawEntry>(
-      `/repos/${owner}/${repo}/issues`,
-      { title: options.title, ...options.body === undefined ? {} : { body: options.body } },
+      `/repos/${owner}/issues`,
+      { repo, title: options.title, body: options.body ?? '' },
       options.signal,
     )
     return mapEntry(raw)
@@ -325,7 +330,7 @@ export class GiteeClient {
    */
   async closeIssue(options: {
     readonly project?: string
-    readonly number: number
+    readonly number: number | string
     readonly signal?: AbortSignal
   }): Promise<GiteeEntry> {
     return this.setIssueState(options, 'closed')
@@ -338,19 +343,31 @@ export class GiteeClient {
    */
   async reopenIssue(options: {
     readonly project?: string
-    readonly number: number
+    readonly number: number | string
     readonly signal?: AbortSignal
   }): Promise<GiteeEntry> {
     return this.setIssueState(options, 'open')
   }
 
-  /** Set one issue's state (close/reopen) and return the updated entry. */
+  /**
+   * Set one issue's state (close/reopen) and return the updated entry. Gitee
+   * only accepts this at the owner level with `repo` in the body, and requires
+   * the current title to be echoed — omitting it blanks the title.
+   */
   private async setIssueState(
-    options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal },
+    options: { readonly project?: string; readonly number: number | string; readonly signal?: AbortSignal },
     state: 'open' | 'closed',
   ): Promise<GiteeEntry> {
     const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
-    await this.patch(`/repos/${owner}/${repo}/issues/${options.number}`, { state })
+    const current = await this.get<RawEntry>(
+      `/repos/${owner}/${repo}/issues/${options.number}`,
+      options.signal === undefined ? {} : { signal: options.signal },
+    )
+    await this.patch(`/repos/${owner}/issues/${options.number}`, {
+      repo,
+      title: current.title,
+      state,
+    }, options.signal)
     const raw = await this.get<RawEntry>(
       `/repos/${owner}/${repo}/issues/${options.number}`,
       options.signal === undefined ? {} : { signal: options.signal },
@@ -365,12 +382,12 @@ export class GiteeClient {
    */
   async commentIssue(options: {
     readonly project?: string
-    readonly number: number
+    readonly number: number | string
     readonly body: string
     readonly signal?: AbortSignal
   }): Promise<GiteeEntry> {
     const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
-    const raw = await this.post<{ id: number; html_url: string; user: { login: string } | null }>(
+    const raw = await this.post<{ id: number; html_url?: string; user: { login: string } | null }>(
       `/repos/${owner}/${repo}/issues/${options.number}/comments`,
       { body: options.body },
       options.signal,
@@ -379,7 +396,9 @@ export class GiteeClient {
       number: options.number,
       title: options.body,
       state: 'comment',
-      webUrl: raw.html_url,
+      // Gitee omits html_url on comment responses; the canonical shape wants a
+      // string, and an empty one keeps the output lossless.
+      webUrl: raw.html_url ?? '',
       authorName: raw.user?.login ?? 'unknown',
     }
   }
@@ -501,7 +520,7 @@ export class GiteeClient {
   /** One authenticated DELETE against the Gitee API. */
   private async del(path: string, signal?: AbortSignal, queryAuth = false): Promise<void> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = this.apiUrl(path)
     if (queryAuth) url.searchParams.set('access_token', token)
     let response: Response
     try {
@@ -544,7 +563,7 @@ export class GiteeClient {
     queryAuth = false,
   ): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = this.apiUrl(path)
     if (queryAuth) url.searchParams.set('access_token', token)
     let response: Response
     try {
@@ -585,7 +604,7 @@ export class GiteeClient {
     queryAuth = false,
   ): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = this.apiUrl(path)
     if (queryAuth) url.searchParams.set('access_token', token)
     let response: Response
     try {
@@ -627,13 +646,24 @@ export class GiteeClient {
     return raw.default_branch
   }
 
+  /**
+   * Join the site's API root with one endpoint path. Gitee's base URL carries a
+   * version segment (`/api/v5`), so resolving an absolute path against it would
+   * discard that segment; concatenate instead.
+   * @param path - endpoint path beginning with "/".
+   * @returns the absolute request URL.
+   */
+  private apiUrl(path: string): URL {
+    return new URL(`${this.site.baseUrl.replace(/\/+$/, '')}${path}`)
+  }
+
   /** One authenticated GET against the Gitee API. */
   private async get<T>(path: string, options: {
     readonly params?: Record<string, string | undefined>
     readonly signal?: AbortSignal
   }, queryAuth = false): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = this.apiUrl(path)
     for (const [key, value] of Object.entries(options.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, value)
     }
