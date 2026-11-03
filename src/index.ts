@@ -12,9 +12,9 @@
  * Tool layout: one resource tool per provider (repos / projects, file,
  * issues, pull requests / merge requests, releases where the platform has
  * them), with an `action` parameter that selects list, create, or modify
- * behaviour — issue and pull-request tools cover create/close/reopen/comment
- * and create/merge/close respectively, so the model-side tool table stays
- * compact.
+ * behaviour — issue tools cover create/close/reopen/comment/comments and
+ * pull-request tools cover create/merge/close/comment/comments, so the
+ * model-side tool table stays compact.
  * @module dsh-git-credentials
  */
 
@@ -28,6 +28,7 @@ import { GiteaClient } from './gitea.ts'
 import { BitbucketClient } from './bitbucket.ts'
 import { GitStore, type ForgeProvider } from './store.ts'
 import { registerGitLabAdmin } from './admin.ts'
+import type { CommentEntry } from './http.ts'
 
 export const name = 'git-credentials'
 
@@ -144,6 +145,21 @@ const githubPullSchema = {
     webUrl: { type: 'string' },
     authorName: { type: 'string' },
     ...pullDetailProperties,
+  },
+  additionalProperties: false,
+} as const
+
+/** Canonical shape of one comment (all providers). */
+const commentSchema = {
+  type: 'object',
+  properties: {
+    id: { oneOf: [{ type: 'integer' }, { type: 'string' }] },
+    body: { type: 'string' },
+    authorName: { type: 'string' },
+    createdAt: { type: 'string' },
+    updatedAt: { type: 'string' },
+    webUrl: { type: 'string' },
+    bodyTruncated: { type: 'boolean' },
   },
   additionalProperties: false,
 } as const
@@ -310,7 +326,6 @@ export function apply(ctx: Context, config: PluginConfig): void {
         case 'create': return [{ type: 'text', text: `Created ${label} #${entryId(entry)}: ${entry.title} — ${entry.webUrl}` }]
         case 'close': return [{ type: 'text', text: `Closed ${label} #${entryId(entry)} — ${entry.webUrl}` }]
         case 'reopen': return [{ type: 'text', text: `Reopened ${label} #${entryId(entry)} — ${entry.webUrl}` }]
-        case 'comment': return [{ type: 'text', text: `Commented on ${label} #${entryId(entry)}: ${entry.title} — ${entry.webUrl}` }]
         case 'merge': return [{ type: 'text', text: `Merged ${label} #${entryId(entry)}: ${entry.title} — ${entry.webUrl}` }]
         default: return [{
           type: 'text',
@@ -318,6 +333,45 @@ export function apply(ctx: Context, config: PluginConfig): void {
         }]
       }
     }
+
+  /** Render the comments actions: created comment or the comment list. */
+  const renderCommentAction = (label: string) =>
+    (args: { action?: string; number?: number | string }, comments: CommentEntry[]): Array<{ type: 'text'; text: string }> => {
+      const number = args.number ?? '?'
+      if (args.action === 'comment') {
+        const comment = comments[0]
+        if (comment === undefined) {
+          return [{ type: 'text', text: `Commented on ${label} #${number} (no summary returned)` }]
+        }
+        const preview = comment.body.split('\n')[0]!.slice(0, 160)
+        const suffix = comment.webUrl === '' ? '' : ` — ${comment.webUrl}`
+        return [{ type: 'text', text: `Commented on ${label} #${number}${preview === '' ? '' : `: ${preview}`}${suffix}` }]
+      }
+      if (comments.length === 0) {
+        return [{ type: 'text', text: `No comments found on ${label} #${number}.` }]
+      }
+      return [{
+        type: 'text',
+        text: comments.map(comment => {
+          const lines = [
+            `#${comment.id} ${comment.authorName} — ${comment.createdAt === '' ? 'unknown time' : comment.createdAt} — ${comment.webUrl === '' ? '(no link)' : comment.webUrl}`,
+            comment.body.trim() === '' ? '(no text)' : comment.body,
+          ]
+          if (comment.bodyTruncated) lines.push('(comment truncated)')
+          return lines.join('\n')
+        }).join('\n\n'),
+      }]
+    }
+
+  /** Render one issues/pulls result: comments actions use the comment shape, the rest entries. */
+  const renderResourceResult = (label: string, plural: string) => {
+    const entries = renderEntryResult(label, plural)
+    const comments = renderCommentAction(label)
+    return (args: { action?: string; number?: number | string }, values: Array<IterationEntry | CommentEntry>) =>
+      args.action === 'comments' || args.action === 'comment'
+        ? comments(args, values as CommentEntry[])
+        : entries(args, values as IterationEntry[])
+  }
 
   /** Render one action "get" read: one block, so the result pipeline keeps the lines apart. */
   const renderEntryDetail = (label: string) =>
@@ -348,10 +402,10 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
   /** Render one issues/pulls result: "get" renders the detail block, every other action its own line. */
   const renderEntryResult = (label: string, plural: string) =>
-    (args: { action?: string }, entries: EntryDetail[]): Array<{ type: 'text'; text: string }> =>
+    (args: { action?: string }, entries: Array<IterationEntry | EntryDetail>): Array<{ type: 'text'; text: string }> =>
       (args.action ?? 'list') === 'get'
-        ? renderEntryDetail(label)(args, entries)
-        : renderEntryAction(label, plural)(args, entries)
+        ? renderEntryDetail(label)(args, entries as EntryDetail[])
+        : renderEntryAction(label, plural)(args, entries as IterationEntry[])
 
   /** Render one repos/projects action result. */
   const renderRepoAction = (args: { action?: string }, repos: IterationRepo[]): Array<{ type: 'text'; text: string }> => {
@@ -449,7 +503,34 @@ export function apply(ctx: Context, config: PluginConfig): void {
     }): Promise<IterationEntry>
     closeIssue(options: { readonly project?: string; readonly number: number | string; readonly signal?: AbortSignal }): Promise<IterationEntry>
     reopenIssue(options: { readonly project?: string; readonly number: number | string; readonly signal?: AbortSignal }): Promise<IterationEntry>
-    commentIssue(options: { readonly project?: string; readonly number: number | string; readonly body: string; readonly signal?: AbortSignal }): Promise<IterationEntry>
+    commentIssue(options: {
+      readonly project?: string
+      readonly number: number | string
+      readonly body: string
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    }): Promise<CommentEntry>
+    commentPull(options: {
+      readonly project?: string
+      readonly number: number
+      readonly body: string
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    }): Promise<CommentEntry>
+    listIssueComments(options: {
+      readonly project?: string
+      readonly number: number | string
+      readonly perPage?: number
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    }): Promise<CommentEntry[]>
+    listPullComments(options: {
+      readonly project?: string
+      readonly number: number
+      readonly perPage?: number
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    }): Promise<CommentEntry[]>
     mergePull(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
     closePull(options: { readonly project?: string; readonly number: number; readonly signal?: AbortSignal }): Promise<IterationEntry>
     listReleases(options: {
@@ -614,11 +695,11 @@ export function apply(ctx: Context, config: PluginConfig): void {
 
     ctx.tools.register(defineTool({
       name: named('issues'),
-      description: `List, read, create, or modify ${label} issues. action: "list" (project?, state?, perPage?), "get" (number — one issue with its description, labels, and dates), "create" (title, body?), "close" (number), "reopen" (number), "comment" (number, body) — the token is injected per site.${SITE_DESCRIPTION}`,
+      description: `List, read, create, or modify ${label} issues. action: "list" (project?, state?, perPage?), "get" (number — one issue with its description, labels, and dates), "create" (title, body?), "close" (number), "reopen" (number), "comment" (number, body), "comments" (number — list comments) — the token is injected per site.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
         action: {
-          type: 'string', enum: ['list', 'get', 'create', 'close', 'reopen', 'comment'],
+          type: 'string', enum: ['list', 'get', 'create', 'close', 'reopen', 'comment', 'comments'],
           description: 'What to do; defaults to "list".',
         },
         project: {
@@ -640,8 +721,8 @@ export function apply(ctx: Context, config: PluginConfig): void {
         body: { type: 'string', description: 'Issue body or comment text (Markdown).' },
       },
       output: {
-        schema: { type: 'array', items: spec.entrySchema },
-        render: renderEntryResult('issue', 'issues'),
+        schema: { type: 'array', items: { oneOf: [spec.entrySchema, commentSchema] } },
+        render: renderResourceResult('issue', 'issues'),
       },
       presentCall(args): GenericCallView {
         const action = args.action ?? 'list'
@@ -650,6 +731,13 @@ export function apply(ctx: Context, config: PluginConfig): void {
             card: 'generic',
             title: `Read issue #${args.number ?? '?'} in ${args.project ?? 'default project'}`,
             kind: 'read',
+          }
+        }
+        if (action === 'comments' || action === 'comment') {
+          return {
+            card: 'generic',
+            title: `${action === 'comments' ? 'Comments on' : 'Comment on'} issue #${args.number ?? '?'} in ${args.project ?? 'default project'}`,
+            kind: action === 'comments' ? 'read' : 'edit',
           }
         }
         return {
@@ -686,10 +774,19 @@ export function apply(ctx: Context, config: PluginConfig): void {
               ...(args.project === undefined ? {} : { project: args.project }),
               number: needEntryNumber(args, named('issues'), spec.stringNumbers === true),
               body: needString(args, 'body', named('issues')),
+              maxBytes: config.fileReadMaxBytes,
               signal: exec.signal,
             })]
+          case 'comments':
+            return c.listIssueComments({
+              ...(args.project === undefined ? {} : { project: args.project }),
+              number: needEntryNumber(args, named('issues'), spec.stringNumbers === true),
+              ...(args.perPage === undefined ? {} : { perPage: args.perPage }),
+              maxBytes: config.fileReadMaxBytes,
+              signal: exec.signal,
+            })
           default:
-            throw new Error(`${named('issues')}: unknown action ${JSON.stringify(args.action)}; valid: list, get, create, close, reopen, comment`)
+            throw new Error(`${named('issues')}: unknown action ${JSON.stringify(args.action)}; valid: list, get, create, close, reopen, comment, comments`)
         }
       },
     }))
@@ -700,11 +797,11 @@ export function apply(ctx: Context, config: PluginConfig): void {
         ? 'merge requests'
         : 'pull requests'}. action: "list" (project?, state?, perPage?), "get" (number — one ${pullsKind === 'merge_requests'
         ? 'merge request'
-        : 'pull request'} with its description, branches, labels, and dates), "create" (title, head/sourceBranch, base/targetBranch, body?), "merge" (number), "close" (number) — the token is injected per site.${SITE_DESCRIPTION}`,
+        : 'pull request'} with its description, branches, labels, and dates), "create" (title, head/sourceBranch, base/targetBranch, body?), "merge" (number), "close" (number), "comment" (number, body), "comments" (number — list comments) — the token is injected per site.${SITE_DESCRIPTION}`,
       parameters: {
         site: siteParameter,
         action: {
-          type: 'string', enum: ['list', 'get', 'create', 'merge', 'close'],
+          type: 'string', enum: ['list', 'get', 'create', 'merge', 'close', 'comment', 'comments'],
           description: 'What to do; defaults to "list".',
         },
         project: {
@@ -716,7 +813,7 @@ export function apply(ctx: Context, config: PluginConfig): void {
           description: `Filter by state (${spec.defaultState === 'opened' ? 'opened/closed/all/merged' : 'open/closed/all'}); only for action "list".`,
         },
         perPage: { type: 'integer', description: 'Maximum number of entries to return (1-100).' },
-        number: { type: 'integer', description: 'PR/MR number (required for get/merge/close).' },
+        number: { type: 'integer', description: 'PR/MR number (required for get/merge/close/comment/comments).' },
         title: { type: 'string', description: 'PR/MR title (required for create).' },
         ...(spec.gitlabExtras === true
           ? {
@@ -730,19 +827,27 @@ export function apply(ctx: Context, config: PluginConfig): void {
         body: { type: 'string', description: 'PR/MR description (Markdown).' },
       },
       output: {
-        schema: { type: 'array', items: spec.pullSchema },
-        render: renderEntryResult(
+        schema: { type: 'array', items: { oneOf: [spec.pullSchema, commentSchema] } },
+        render: renderResourceResult(
           pullsKind === 'merge_requests' ? 'merge request' : 'pull request',
           pullsKind === 'merge_requests' ? 'merge requests' : 'pull requests',
         ),
       },
       presentCall(args): GenericCallView {
         const action = args.action ?? 'list'
+        const kind = pullsKind === 'merge_requests' ? 'merge request' : 'pull request'
         if (action === 'get') {
           return {
             card: 'generic',
-            title: `Read ${pullsKind === 'merge_requests' ? 'merge request' : 'pull request'} #${args.number ?? '?'} in ${args.project ?? 'default project'}`,
+            title: `Read ${kind} #${args.number ?? '?'} in ${args.project ?? 'default project'}`,
             kind: 'read',
+          }
+        }
+        if (action === 'comments' || action === 'comment') {
+          return {
+            card: 'generic',
+            title: `${action === 'comments' ? 'Comments on' : 'Comment on'} ${kind} #${args.number ?? '?'} in ${args.project ?? 'default project'}`,
+            kind: action === 'comments' ? 'read' : 'edit',
           }
         }
         return {
@@ -787,8 +892,24 @@ export function apply(ctx: Context, config: PluginConfig): void {
             return [await c.mergePull({ ...(args.project === undefined ? {} : { project: args.project }), number: needNumber(args, named(pullsKind)), signal: exec.signal })]
           case 'close':
             return [await c.closePull({ ...(args.project === undefined ? {} : { project: args.project }), number: needNumber(args, named(pullsKind)), signal: exec.signal })]
+          case 'comment':
+            return [await c.commentPull({
+              ...(args.project === undefined ? {} : { project: args.project }),
+              number: needNumber(args, named(pullsKind)),
+              body: needString(args, 'body', named(pullsKind)),
+              maxBytes: config.fileReadMaxBytes,
+              signal: exec.signal,
+            })]
+          case 'comments':
+            return c.listPullComments({
+              ...(args.project === undefined ? {} : { project: args.project }),
+              number: needNumber(args, named(pullsKind)),
+              ...(args.perPage === undefined ? {} : { perPage: args.perPage }),
+              maxBytes: config.fileReadMaxBytes,
+              signal: exec.signal,
+            })
           default:
-            throw new Error(`${named(pullsKind)}: unknown action ${JSON.stringify(args.action)}; valid: list, get, create, merge, close`)
+            throw new Error(`${named(pullsKind)}: unknown action ${JSON.stringify(args.action)}; valid: list, get, create, merge, close, comment, comments`)
         }
       },
     }))

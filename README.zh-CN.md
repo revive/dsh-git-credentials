@@ -104,38 +104,40 @@ HMR watcher 监控 home 层：加行 = 热挂载（运行中的 GUI 直接生效
 
 ### 工具
 
-每个平台一个资源工具，`action` 参数选择操作。list 类 action 返回该平台的规范摘要形状（仓库：`{id, path, name, webUrl, visibility}`；issue/PR：`{number|iid, title, state, webUrl, authorName}`；文件：`{path, ref, content, truncated}`）。`get` 完整读取单个 issue 或 MR/PR——在摘要之外附 `body`、`labels`、`createdAt`、`updatedAt`、`bodyTruncated`，MR/PR 另有 `sourceBranch`、`targetBranch`、`draft`；正文按配置的字节上限截断，被截断时会显式标记。写操作会真实修改远端——模型调用前应与用户确认。
+每个平台一个资源工具，`action` 参数选择操作。list 类 action 返回该平台的规范摘要形状（仓库：`{id, path, name, webUrl, visibility}`；issue/PR：`{number|iid, title, state, webUrl, authorName}`；文件：`{path, ref, content, truncated}`）。`get` 完整读取单个 issue 或 MR/PR——在摘要之外附 `body`、`labels`、`createdAt`、`updatedAt`、`bodyTruncated`，MR/PR 另有 `sourceBranch`、`targetBranch`、`draft`；正文按配置的字节上限截断，被截断时会显式标记。`comments` 列出某个 issue/PR/MR 的评论，`comment` 发表评论；两者都返回 `{id, body, authorName, createdAt, updatedAt, webUrl, bodyTruncated}`，正文同样按上限截断。写操作会真实修改远端——模型调用前应与用户确认。
 
 | 工具 | `action` | 参数 |
 |---|---|---|
 | `gitlab_projects` | `list`、`create` | list: `search?`、`membership?`、`perPage?` · create: `name`、`namespace?`、`description?`、`path?`、`visibility?` |
 | `gitlab_file` | `read` | `project`、`path`、`ref?` |
-| `gitlab_merge_requests` | `list`、`get`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`sourceBranch`、`targetBranch`、`body?` |
-| `gitlab_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
+| `gitlab_merge_requests` | `list`、`get`、`create`、`merge`、`close`、`comment`、`comments` | `project?`、`state?`、`perPage?`、`number`、`title`、`sourceBranch`、`targetBranch`、`body?` |
+| `gitlab_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment`、`comments` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
 | `github_repos` | `list`、`create` | list: `search?`、`perPage?` · create: `name`、`description?`、`private?` |
 | `github_file` | `read` | `project`（owner/repo）、`path`、`ref?` |
-| `github_pull_requests` | `list`、`get`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
-| `github_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
+| `github_pull_requests` | `list`、`get`、`create`、`merge`、`close`、`comment`、`comments` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
+| `github_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment`、`comments` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
 | `gitee_repos` | `list`、`create` | list: `search?`、`perPage?` · create: `name`、`description?`、`private?` |
 | `gitee_file` | `read` | `project`（owner/repo）、`path`、`ref?` |
-| `gitee_pull_requests` | `list`、`get`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
-| `gitee_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
+| `gitee_pull_requests` | `list`、`get`、`create`、`merge`、`close`、`comment`、`comments` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
+| `gitee_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment`、`comments` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
 | `gitea_repos` | `list`、`create` | list: `search?`、`perPage?` · create: `name`、`description?`、`private?` |
 | `gitea_file` | `read` | `project`（owner/repo）、`path`、`ref?` |
-| `gitea_pull_requests` | `list`、`get`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
-| `gitea_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
+| `gitea_pull_requests` | `list`、`get`、`create`、`merge`、`close`、`comment`、`comments` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
+| `gitea_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment`、`comments` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
 | `gitlab_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`（create 必需；GitLab 按 tag 删除）、`name?`、`body?`、`draft?`、`prerelease?` |
 | `github_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`、`number`（release id，delete 必需）、`name?`、`body?`、`draft?`、`prerelease?` |
 | `gitee_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`、`number`（release id，delete 必需）、`name?`、`body?`、`draft?`、`prerelease?` |
 | `gitea_releases` | `list`、`create`、`delete` | `project?`、`perPage?`、`tag`、`number`（release id，delete 必需）、`name?`、`body?`、`draft?`、`prerelease?` |
 | `bitbucket_repos` | `list`、`create` | list: `search?`、`perPage?` · create: `name`、`description?`、`private?` |
 | `bitbucket_file` | `read` | `project`（workspace/repo）、`path`、`ref?` |
-| `bitbucket_pull_requests` | `list`、`get`、`create`、`merge`、`close` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
-| `bitbucket_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
+| `bitbucket_pull_requests` | `list`、`get`、`create`、`merge`、`close`、`comment`、`comments` | `project?`、`state?`、`perPage?`、`number`、`title`、`head`、`base`、`body?` |
+| `bitbucket_issues` | `list`、`get`、`create`、`close`、`reopen`、`comment`、`comments` | `project?`、`state?`、`perPage?`、`number`、`title`、`body?` |
 
 - `action` 默认读操作（`list`；file 为 `read`）——现有读调用不受影响
-- `number` 是 issue/PR 编号（GitLab 为 iid）；`get` / `close` / `reopen` / `comment` / `merge` 必需
-- Gitee 的 issue 编号是字符串（如 `IKRZSO`）：`gitee_issues` 的 `number` 同时接受整数和这种字符串。Gitee 的 issue 创建/状态变更走 owner 级端点（客户端在 body 里带 `repo`），并保留站点 API 地址中的 `/api/v5` 前缀
+- `number` 是 issue/PR 编号（GitLab 为 iid）；`get` / `close` / `reopen` / `comment` / `comments` / `merge` 必需
+- Gitee 的 issue 编号是字符串（如 `IKRZSO`）：`gitee_issues` 的 `number` 同时接受整数和这种字符串。Gitee 的 issue 创建/状态变更走 owner 级端点（客户端在 body 里带 `repo`）
+- `comments` 与 `comment` 同时覆盖 issue 和 PR/MR：GitHub、Gitea 的 PR 普通评论走 issue-comments 端点；GitLab 读 notes 并过滤 system note；Gitee 读 issue 或 PR 评论（PR 创建评论的响应很稀疏，会回读列表补全）；Bitbucket 跳过已删除的评论
+- 所有客户端都保留站点 API 地址中的路径段（Gitee `/api/v5`、Gitea `/api/v1`、Bitbucket `/2.0`、GitHub Enterprise `/api/v3`）——不能用绝对端点路径去解析 base，否则会丢掉这段前缀
 - `state` 取值：GitLab `opened`/`closed`/`all`（MR 另有 `merged`），其余平台 `open`/`closed`/`all`
 - `file` 恒为读取：`project`、`path`、`ref?`（默认分支；超过字节上限截断并标记）
 - `bitbucket_repos` 的 create 需要站点 `defaultProject`（`workspace/repo`）才能确定 workspace

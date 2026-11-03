@@ -8,7 +8,7 @@
  * @module git-gitee
  */
 
-import { errorDetail, errorMessage, pageSize, tokenFor, type AuthedSite } from './http.ts'
+import { apiUrl, errorDetail, errorMessage, makeComment, pageSize, tokenFor, type AuthedSite, type CommentEntry } from './http.ts'
 
 /** A repository summary as Gitee's API returns it. */
 export interface GiteeRepo {
@@ -88,6 +88,19 @@ interface RawDetail extends RawEntry {
 interface RawFile {
   readonly encoding?: string
   readonly content?: string
+}
+
+/**
+ * Raw issue/PR comment. Gitee's PR create response is sparse (id + body only),
+ * so every field except the id is optional.
+ */
+interface RawComment {
+  readonly id: number | string
+  readonly body?: string
+  readonly user?: { readonly login: string } | null
+  readonly created_at?: string
+  readonly updated_at?: string
+  readonly html_url?: string
 }
 
 /** Split `owner/repo` into two path segments; fails loud on a malformed argument. */
@@ -380,27 +393,121 @@ export class GiteeClient {
    * @param options - project, issue number, comment body, cancellation.
    * @returns a comment-shaped entry (`state: "comment"`, title = comment body).
    */
+  async listIssueComments(options: {
+    readonly project?: string
+    readonly number: number | string
+    readonly perPage?: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry[]> {
+    return this.listComments('issues', options)
+  }
+
+  /** List comments on a pull request. */
+  async listPullComments(options: {
+    readonly project?: string
+    readonly number: number
+    readonly perPage?: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry[]> {
+    return this.listComments('pulls', options)
+  }
+
+  /**
+   * Comment on an issue (write operation). Gitee omits html_url on comment
+   * responses; the canonical shape takes an empty string.
+   * @param options - project, issue number, body, body cap, cancellation.
+   * @returns the created comment.
+   */
   async commentIssue(options: {
     readonly project?: string
     readonly number: number | string
     readonly body: string
+    readonly maxBytes: number
     readonly signal?: AbortSignal
-  }): Promise<GiteeEntry> {
+  }): Promise<CommentEntry> {
+    return this.createComment('issues', options)
+  }
+
+  /**
+   * Comment on a pull request (write operation). Gitee's create response can
+   * be just `{ id, body }`, so the comment is re-read from the list when the
+   * response carries no author/timestamp.
+   * @param options - project, PR number, body, body cap, cancellation.
+   * @returns the created comment.
+   */
+  async commentPull(options: {
+    readonly project?: string
+    readonly number: number
+    readonly body: string
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry> {
+    const created = await this.createComment('pulls', options)
+    if (created.authorName !== 'unknown' || created.createdAt !== '') return created
+    const listed = await this.listPullComments({
+      ...options.project === undefined ? {} : { project: options.project },
+      number: options.number,
+      perPage: 100,
+      maxBytes: options.maxBytes,
+      ...options.signal === undefined ? {} : { signal: options.signal },
+    })
+    return listed.find(comment => String(comment.id) === String(created.id)) ?? created
+  }
+
+  /** List comments on one issue or pull request. */
+  private async listComments(
+    kind: 'issues' | 'pulls',
+    options: {
+      readonly project?: string
+      readonly number: number | string
+      readonly perPage?: number
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    },
+  ): Promise<CommentEntry[]> {
     const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
-    const raw = await this.post<{ id: number; html_url?: string; user: { login: string } | null }>(
-      `/repos/${owner}/${repo}/issues/${options.number}/comments`,
+    const raw = await this.get<RawComment[]>(`/repos/${owner}/${repo}/${kind}/${options.number}/comments`, {
+      params: { per_page: pageSize(options.perPage) },
+      ...options.signal === undefined ? {} : { signal: options.signal },
+    })
+    return raw.map(comment => makeComment({
+      id: comment.id,
+      body: comment.body ?? '',
+      authorName: comment.user?.login,
+      createdAt: comment.created_at,
+      updatedAt: comment.updated_at,
+      // Gitee omits html_url on comments; the schema takes an empty string.
+      webUrl: comment.html_url ?? '',
+    }, options.maxBytes))
+  }
+
+  /** Create one comment on an issue or pull request. */
+  private async createComment(
+    kind: 'issues' | 'pulls',
+    options: {
+      readonly project?: string
+      readonly number: number | string
+      readonly body: string
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    },
+  ): Promise<CommentEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<RawComment>(
+      `/repos/${owner}/${repo}/${kind}/${options.number}/comments`,
       { body: options.body },
       options.signal,
     )
-    return {
-      number: options.number,
-      title: options.body,
-      state: 'comment',
-      // Gitee omits html_url on comment responses; the canonical shape wants a
-      // string, and an empty one keeps the output lossless.
+    return makeComment({
+      id: raw.id,
+      body: raw.body ?? options.body,
+      authorName: raw.user?.login,
+      createdAt: raw.created_at,
+      updatedAt: raw.updated_at,
       webUrl: raw.html_url ?? '',
-      authorName: raw.user?.login ?? 'unknown',
-    }
+    }, options.maxBytes)
   }
 
   /**
@@ -520,7 +627,7 @@ export class GiteeClient {
   /** One authenticated DELETE against the Gitee API. */
   private async del(path: string, signal?: AbortSignal, queryAuth = false): Promise<void> {
     const token = tokenFor(this.tokens, this.site)
-    const url = this.apiUrl(path)
+    const url = apiUrl(this.site.baseUrl, path)
     if (queryAuth) url.searchParams.set('access_token', token)
     let response: Response
     try {
@@ -563,7 +670,7 @@ export class GiteeClient {
     queryAuth = false,
   ): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = this.apiUrl(path)
+    const url = apiUrl(this.site.baseUrl, path)
     if (queryAuth) url.searchParams.set('access_token', token)
     let response: Response
     try {
@@ -604,7 +711,7 @@ export class GiteeClient {
     queryAuth = false,
   ): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = this.apiUrl(path)
+    const url = apiUrl(this.site.baseUrl, path)
     if (queryAuth) url.searchParams.set('access_token', token)
     let response: Response
     try {
@@ -646,24 +753,13 @@ export class GiteeClient {
     return raw.default_branch
   }
 
-  /**
-   * Join the site's API root with one endpoint path. Gitee's base URL carries a
-   * version segment (`/api/v5`), so resolving an absolute path against it would
-   * discard that segment; concatenate instead.
-   * @param path - endpoint path beginning with "/".
-   * @returns the absolute request URL.
-   */
-  private apiUrl(path: string): URL {
-    return new URL(`${this.site.baseUrl.replace(/\/+$/, '')}${path}`)
-  }
-
   /** One authenticated GET against the Gitee API. */
   private async get<T>(path: string, options: {
     readonly params?: Record<string, string | undefined>
     readonly signal?: AbortSignal
   }, queryAuth = false): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = this.apiUrl(path)
+    const url = apiUrl(this.site.baseUrl, path)
     for (const [key, value] of Object.entries(options.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, value)
     }

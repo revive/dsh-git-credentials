@@ -6,7 +6,7 @@
  * @module gitlab-client
  */
 
-import { errorDetail, errorMessage, pageSize, tokenFor, type AuthedSite } from './http.ts'
+import { errorDetail, errorMessage, makeComment, pageSize, tokenFor, type AuthedSite, type CommentEntry } from './http.ts'
 
 /** A project summary as GitLab's `/projects` endpoint returns it. */
 export interface GitLabProject {
@@ -86,6 +86,16 @@ interface RawDetail {
   readonly target_branch?: string
   readonly draft?: boolean
   readonly work_in_progress?: boolean
+}
+
+/** Raw note (comment) on an issue or merge request. */
+interface RawNote {
+  readonly id: number
+  readonly body: string
+  readonly author: { readonly name: string } | null
+  readonly created_at: string
+  readonly updated_at: string
+  readonly system?: boolean
 }
 
 /**
@@ -399,30 +409,113 @@ export class GitLabClient {
     return mapEntry(raw)
   }
 
+  async listIssueComments(options: {
+    readonly project?: string
+    readonly number: number | string
+    readonly perPage?: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry[]> {
+    return this.listNotes('issues', options)
+  }
+
+  /** List comments on a merge request. */
+  async listPullComments(options: {
+    readonly project?: string
+    readonly number: number
+    readonly perPage?: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry[]> {
+    return this.listNotes('merge_requests', options)
+  }
+
   /**
    * Comment on an issue (write operation).
-   * @param options - project, issue iid, comment body, cancellation.
-   * @returns a comment-shaped entry (`state: "comment"`, title = comment body).
+   * @param options - project, issue iid, body, body cap, cancellation.
+   * @returns the created comment.
    */
   async commentIssue(options: {
     readonly project?: string
+    readonly number: number | string
+    readonly body: string
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry> {
+    return this.createNote('issues', options)
+  }
+
+  /**
+   * Comment on a merge request (write operation).
+   * @param options - project, MR iid, body, body cap, cancellation.
+   * @returns the created comment.
+   */
+  async commentPull(options: {
+    readonly project?: string
     readonly number: number
     readonly body: string
+    readonly maxBytes: number
     readonly signal?: AbortSignal
-  }): Promise<GitLabListEntry> {
-    const project = encodeURIComponent(this.resolveProject(options.project))
-    const raw = await this.post<{ id: number; body: string; author: { readonly name: string } | null }>(
-      `/projects/${project}/issues/${options.number}/notes`,
+  }): Promise<CommentEntry> {
+    return this.createNote('merge_requests', options)
+  }
+
+  /** List the human notes on one issue or merge request. */
+  private async listNotes(
+    kind: 'issues' | 'merge_requests',
+    options: {
+      readonly project?: string
+      readonly number: number | string
+      readonly perPage?: number
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    },
+  ): Promise<CommentEntry[]> {
+    const projectPath = this.resolveProject(options.project)
+    const raw = await this.get<RawNote[]>(
+      `/projects/${encodeURIComponent(projectPath)}/${kind}/${options.number}/notes`,
+      {
+        params: { per_page: pageSize(options.perPage) },
+        ...options.signal === undefined ? {} : { signal: options.signal },
+      },
+    )
+    return raw
+      .filter(note => note.system !== true)
+      .map(note => makeComment({
+        id: note.id,
+        body: note.body,
+        authorName: note.author?.name,
+        createdAt: note.created_at,
+        updatedAt: note.updated_at,
+        webUrl: `${this.site.baseUrl.replace(/\/+$/, '')}/${projectPath}/-/${kind}/${options.number}#note_${note.id}`,
+      }, options.maxBytes))
+  }
+
+  /** Create one note on an issue or merge request. */
+  private async createNote(
+    kind: 'issues' | 'merge_requests',
+    options: {
+      readonly project?: string
+      readonly number: number | string
+      readonly body: string
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    },
+  ): Promise<CommentEntry> {
+    const projectPath = this.resolveProject(options.project)
+    const raw = await this.post<RawNote>(
+      `/projects/${encodeURIComponent(projectPath)}/${kind}/${options.number}/notes`,
       { body: options.body },
       options.signal,
     )
-    return {
-      iid: options.number,
-      title: options.body,
-      state: 'comment',
-      webUrl: `${this.site.baseUrl.replace(/\/+$/, '')}/${options.project}/-/issues/${options.number}#note_${raw.id}`,
-      authorName: raw.author?.name ?? 'unknown',
-    }
+    return makeComment({
+      id: raw.id,
+      body: raw.body,
+      authorName: raw.author?.name,
+      createdAt: raw.created_at,
+      updatedAt: raw.updated_at,
+      webUrl: `${this.site.baseUrl.replace(/\/+$/, '')}/${projectPath}/-/${kind}/${options.number}#note_${raw.id}`,
+    }, options.maxBytes)
   }
 
   /**

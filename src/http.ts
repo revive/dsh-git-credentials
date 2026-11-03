@@ -13,6 +13,59 @@ export interface AuthedSite {
 }
 
 /**
+ * Join one site's API base URL with an endpoint path, preserving any path
+ * segment in the base (`/api/v5` on Gitee, `/api/v1` on Gitea, `/2.0` on
+ * Bitbucket, `/api/v3` on GitHub Enterprise). Resolving an absolute path
+ * against the base would discard that segment.
+ * @param baseUrl - the site's API base URL.
+ * @param path - the endpoint path, with or without a leading slash.
+ * @returns the absolute request URL.
+ */
+export function apiUrl(baseUrl: string, path: string): URL {
+  return new URL(`${baseUrl.replace(/\/+$/, '')}${path.startsWith('/') ? path : `/${path}`}`)
+}
+
+/** One comment as every forge client returns it: already capped and normalized. */
+export interface CommentEntry {
+  readonly id: number | string
+  readonly body: string
+  readonly authorName: string
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly webUrl: string
+  readonly bodyTruncated: boolean
+}
+
+/**
+ * Build one canonical comment, capping its body at the configured byte limit.
+ * Missing author/timestamps/links become stable empty strings, so a partial
+ * create response still satisfies the tool's output schema.
+ * @param comment - the fields known from the API response.
+ * @param maxBytes - the configured body cap.
+ * @returns the canonical comment.
+ */
+export function makeComment(comment: {
+  readonly id: number | string
+  readonly body: string
+  readonly authorName?: string | undefined
+  readonly createdAt?: string | undefined
+  readonly updatedAt?: string | undefined
+  readonly webUrl?: string | undefined
+}, maxBytes: number): CommentEntry {
+  const body = comment.body ?? ''
+  const truncated = body.length > maxBytes
+  return {
+    id: comment.id,
+    body: truncated ? body.slice(0, maxBytes) : body,
+    authorName: comment.authorName ?? 'unknown',
+    createdAt: comment.createdAt ?? '',
+    updatedAt: comment.updatedAt ?? '',
+    webUrl: comment.webUrl ?? '',
+    bodyTruncated: truncated,
+  }
+}
+
+/**
  * Resolve the site's own token from one operation snapshot; fails loud when it
  * is unconfigured.
  * @param tokens - the operation's decrypted token snapshot, keyed by site id.

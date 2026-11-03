@@ -162,6 +162,24 @@ try {
     console.log(`ok: ${name} exposes the get action`)
   }
 
+  // Comments are a first-class action on both resources: issues can list
+  // comments, pull/merge requests can list and create them.
+  for (const name of [
+    'gitlab_issues', 'github_issues', 'gitee_issues', 'gitea_issues', 'bitbucket_issues',
+  ]) {
+    const actions = tools.get(name)?.parameters?.properties?.action?.enum ?? []
+    if (!actions.includes('comments')) throw new Error(`${name} does not expose the comments action`)
+  }
+  for (const name of [
+    'gitlab_merge_requests', 'github_pull_requests', 'gitee_pull_requests', 'gitea_pull_requests', 'bitbucket_pull_requests',
+  ]) {
+    const actions = tools.get(name)?.parameters?.properties?.action?.enum ?? []
+    if (!actions.includes('comment') || !actions.includes('comments')) {
+      throw new Error(`${name} does not expose the comment/comments actions`)
+    }
+  }
+  console.log('ok: issues can list comments and pull/merge requests can list and create them')
+
   // A namespace only GitLab's create takes: the GitLab tool must advertise it,
   // and the other providers' repo tools must not inherit a GitLab-only knob.
   {
@@ -274,7 +292,8 @@ try {
   const SURFACE = [
     'listRepos', 'readFile', 'listIssues', 'listPullRequests', 'getIssue', 'getPull',
     'createRepo', 'createIssue', 'createPullRequest',
-    'closeIssue', 'reopenIssue', 'commentIssue', 'mergePull', 'closePull',
+    'closeIssue', 'reopenIssue', 'commentIssue', 'commentPull',
+    'listIssueComments', 'listPullComments', 'mergePull', 'closePull',
   ] as const
   // Bitbucket has no releases API, so it is exempt from the release methods.
   const RELEASE_SURFACE = ['listReleases', 'createRelease', 'deleteRelease'] as const
@@ -472,11 +491,220 @@ try {
       if (reopened.state !== 'open') throw new Error(`Gitee reopen did not report the new state: ${JSON.stringify(reopened)}`)
 
       calls.length = 0
-      const comment = await client.commentIssue({ project: 'acme/repo', number: 'IKRZSO', body: 'hi' })
+      const comment = await client.commentIssue({ project: 'acme/repo', number: 'IKRZSO', body: 'hi', maxBytes: 1024 })
       if (comment.webUrl !== '') {
         throw new Error(`Gitee comment without html_url must report an empty webUrl: ${JSON.stringify(comment)}`)
       }
       console.log('ok: Gitee preserves /api/v5 and uses owner-level issue writes with string ids')
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  }
+
+
+  // Comments across providers: each client's list/create path, canonical
+  // mapping, and the base-path join that Gitee/Gitea/Bitbucket need.
+  {
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
+    const realFetch = globalThis.fetch
+    const comment = {
+      id: 11,
+      body: 'Hello',
+      user: { login: 'octocat' },
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-02T00:00:00Z',
+      html_url: 'https://github.com/o/r/issues/7#issuecomment-11',
+    }
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? 'GET'
+      calls.push({
+        url,
+        method,
+        ...init?.body === undefined ? {} : { body: JSON.parse(String(init.body)) as Record<string, unknown> },
+      })
+      return new Response(JSON.stringify(method === 'POST' ? comment : [comment]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as typeof fetch
+    try {
+      const client = new GitHubClient({ gh: 'x' }, { id: 'gh', baseUrl: 'https://api.github.com' })
+      const comments = await client.listIssueComments({ project: 'o/r', number: 7, maxBytes: 1024 })
+      if (calls[0]?.url !== 'https://api.github.com/repos/o/r/issues/7/comments?per_page=20') {
+        throw new Error(`unexpected GitHub comment list URL: ${calls[0]?.url}`)
+      }
+      if (comments[0]?.authorName !== 'octocat' || comments[0]?.webUrl === '') {
+        throw new Error(`GitHub comment mapping failed: ${JSON.stringify(comments)}`)
+      }
+      const created = await client.commentPull({ project: 'o/r', number: 7, body: 'Hello', maxBytes: 1024 })
+      if (calls[1]?.method !== 'POST' || calls[1]?.body?.body !== 'Hello' || created.id !== 11) {
+        throw new Error(`GitHub comment create failed: ${JSON.stringify(calls)}`)
+      }
+      console.log('ok: GitHub comments list/create')
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  }
+
+  {
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
+    const realFetch = globalThis.fetch
+    const notes = [
+      { id: 1, body: 'Human note', author: { name: 'Alice' }, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z', system: false },
+      { id: 2, body: 'changed state', author: { name: 'Bot' }, created_at: '2026-01-03T00:00:00Z', updated_at: '2026-01-03T00:00:00Z', system: true },
+    ]
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? 'GET'
+      calls.push({
+        url,
+        method,
+        ...init?.body === undefined ? {} : { body: JSON.parse(String(init.body)) as Record<string, unknown> },
+      })
+      return new Response(JSON.stringify(method === 'POST' ? notes[0] : notes), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as typeof fetch
+    try {
+      const client = new GitLabClient({ gl: 'x' }, { id: 'gl', baseUrl: 'https://gitlab.example.com' })
+      const comments = await client.listIssueComments({ project: 'group/proj', number: 5, maxBytes: 1024 })
+      if (comments.length !== 1 || comments[0]?.authorName !== 'Alice'
+        || comments[0]?.webUrl !== 'https://gitlab.example.com/group/proj/-/issues/5#note_1') {
+        throw new Error(`GitLab note mapping failed: ${JSON.stringify(comments)}`)
+      }
+      if (!(calls[0]?.url.endsWith('/api/v4/projects/group%2Fproj/issues/5/notes?per_page=20'))) {
+        throw new Error(`unexpected GitLab note list URL: ${calls[0]?.url}`)
+      }
+      await client.commentPull({ project: 'group/proj', number: 3, body: 'LGTM', maxBytes: 1024 })
+      if (calls[1]?.method !== 'POST' || !calls[1]?.url.endsWith('/api/v4/projects/group%2Fproj/merge_requests/3/notes')) {
+        throw new Error(`unexpected GitLab merge-request note URL: ${JSON.stringify(calls[1])}`)
+      }
+      console.log('ok: GitLab notes list/create, system notes filtered')
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  }
+
+  {
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
+    const realFetch = globalThis.fetch
+    const comment = {
+      id: 3,
+      body: 'Gitea comment',
+      user: { login: 'gitea-user' },
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-02T00:00:00Z',
+      html_url: 'https://gitea.example.com/o/r/issues/3#issuecomment-3',
+    }
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? 'GET'
+      calls.push({
+        url,
+        method,
+        ...init?.body === undefined ? {} : { body: JSON.parse(String(init.body)) as Record<string, unknown> },
+      })
+      return new Response(JSON.stringify(method === 'POST' ? comment : [comment]), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as typeof fetch
+    try {
+      const client = new GiteaClient({ gt: 'x' }, { id: 'gt', baseUrl: 'https://gitea.example.com/api/v1' })
+      const comments = await client.listPullComments({ project: 'o/r', number: 3, maxBytes: 1024 })
+      if (!(calls[0]?.url.startsWith('https://gitea.example.com/api/v1/repos/o/r/issues/3/comments'))) {
+        throw new Error(`Gitea dropped its API base path: ${calls[0]?.url}`)
+      }
+      if (comments[0]?.authorName !== 'gitea-user') throw new Error('Gitea comment mapping failed')
+      await client.commentPull({ project: 'o/r', number: 3, body: 'hi', maxBytes: 1024 })
+      if (calls[1]?.method !== 'POST' || !calls[1]?.url.startsWith('https://gitea.example.com/api/v1/repos/o/r/issues/3/comments')) {
+        throw new Error(`Gitea comment create URL: ${JSON.stringify(calls[1])}`)
+      }
+      console.log('ok: Gitea comments keep /api/v1')
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  }
+
+  {
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
+    const realFetch = globalThis.fetch
+    const comment = {
+      id: 5,
+      content: { raw: 'Bitbucket comment' },
+      user: { display_name: 'Bob' },
+      created_on: '2026-01-01T00:00:00Z',
+      updated_on: '2026-01-02T00:00:00Z',
+      links: { html: { href: 'https://bitbucket.org/ws/repo/pullrequests/4#comment-5' } },
+    }
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? 'GET'
+      calls.push({
+        url,
+        method,
+        ...init?.body === undefined ? {} : { body: JSON.parse(String(init.body)) as Record<string, unknown> },
+      })
+      const payload = method === 'POST' ? comment : { values: [comment] }
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as typeof fetch
+    try {
+      const client = new BitbucketClient({ bb: 'x' }, { id: 'bb', baseUrl: 'https://api.bitbucket.org/2.0' })
+      const comments = await client.listPullComments({ project: 'ws/repo', number: 4, maxBytes: 1024 })
+      if (calls[0]?.url !== 'https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/4/comments?pagelen=20') {
+        throw new Error(`Bitbucket dropped /2.0: ${calls[0]?.url}`)
+      }
+      if (comments[0]?.authorName !== 'Bob' || comments[0]?.webUrl === '') {
+        throw new Error(`Bitbucket comment mapping failed: ${JSON.stringify(comments)}`)
+      }
+      await client.commentIssue({ project: 'ws/repo', number: 4, body: 'hi', maxBytes: 1024 })
+      if (calls[1]?.method !== 'POST' || (calls[1]?.body?.content as { raw?: string } | undefined)?.raw !== 'hi') {
+        throw new Error(`Bitbucket comment create body: ${JSON.stringify(calls[1])}`)
+      }
+      console.log('ok: Bitbucket comments keep /2.0')
+    } finally {
+      globalThis.fetch = realFetch
+    }
+  }
+
+  {
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
+    const realFetch = globalThis.fetch
+    const created = { id: '9', body: 'hi' }
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? 'GET'
+      calls.push({
+        url,
+        method,
+        ...init?.body === undefined ? {} : { body: JSON.parse(String(init.body)) as Record<string, unknown> },
+      })
+      const payload = method === 'POST'
+        ? created
+        : [{ id: 9, body: 'hi', user: { login: 'gitee-user' }, created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-02T00:00:00Z' }]
+      return new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as typeof fetch
+    try {
+      const client = new GiteeClient({ gitee: 'x' }, { id: 'gitee', baseUrl: 'https://gitee.com/api/v5' })
+      const comment = await client.commentPull({ project: 'o/r', number: 4, body: 'hi', maxBytes: 1024 })
+      if (calls[0]?.method !== 'POST' || !calls[0]?.url.endsWith('/api/v5/repos/o/r/pulls/4/comments')) {
+        throw new Error(`Gitee PR comment URL: ${JSON.stringify(calls[0])}`)
+      }
+      if (comment.authorName !== 'gitee-user') {
+        throw new Error(`Gitee sparse comment response was not re-read: ${JSON.stringify(comment)}`)
+      }
+      if (calls[1]?.method !== 'GET' || !calls[1]?.url.startsWith('https://gitee.com/api/v5/repos/o/r/pulls/4/comments')) {
+        throw new Error(`Gitee comment re-read URL: ${JSON.stringify(calls[1])}`)
+      }
+      console.log('ok: Gitee PR comments re-read a sparse create response')
     } finally {
       globalThis.fetch = realFetch
     }

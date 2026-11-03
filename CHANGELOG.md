@@ -10,6 +10,27 @@ to users as the release notes.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-03
+
+### Added
+
+- Comments are readable and writable on every issue and merge/pull-request tool: `comments` lists the
+  comments of one issue/PR/MR, and `comment` creates one (issues already had `comment`; merge and
+  pull requests now have both). Each comment is capped at the configured read limit and reported as
+  `{id, body, authorName, createdAt, updatedAt, webUrl, bodyTruncated}`.
+- GitLab system notes are filtered out of comment lists, and deleted Bitbucket comments are skipped.
+  GitHub and Gitea serve general pull-request comments from their issue-comments endpoints; GitLab
+  reads issue notes or merge-request notes; Gitee reads issue or pull-request comments.
+
+### Changed
+
+- `comment` actions now return the canonical comment shape instead of the previous issue-like entry
+  (`number`/`title`/`state: "comment"`). The created comment's `id`, author, timestamps, and link are
+  reported directly.
+- Every client joins the site's API base URL with the endpoint path. Bitbucket's `/2.0` and Gitea's
+  `/api/v1` were dropped the same way Gitee's `/api/v5` was before 0.6.2, so those two providers
+  404'd on every request; GitHub Enterprise base URLs with a path now work too.
+
 ## [0.6.2] - 2026-11-03
 
 ### Fixed

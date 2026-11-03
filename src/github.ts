@@ -7,7 +7,7 @@
  * @module git-github
  */
 
-import { errorDetail, errorMessage, pageSize, tokenFor, type AuthedSite } from './http.ts'
+import { apiUrl, errorDetail, errorMessage, makeComment, pageSize, tokenFor, type AuthedSite, type CommentEntry } from './http.ts'
 
 /** A repository summary as GitHub's API returns it. */
 export interface GitHubRepo {
@@ -89,6 +89,16 @@ interface RawDetail extends RawEntry {
 interface RawFile {
   readonly encoding?: string
   readonly content?: string
+}
+
+/** Raw issue/PR comment (GitHub shares the issue-comments endpoint for PRs). */
+interface RawComment {
+  readonly id: number
+  readonly body: string
+  readonly user: { readonly login: string } | null
+  readonly created_at: string
+  readonly updated_at: string
+  readonly html_url: string
 }
 
 /** Split `owner/repo` into two path segments; fails loud on a malformed argument. */
@@ -366,25 +376,105 @@ export class GitHubClient {
    * @param options - project, issue number, comment body, cancellation.
    * @returns a comment-shaped entry (`state: "comment"`, title = comment body).
    */
+  async listIssueComments(options: {
+    readonly project?: string
+    readonly number: number | string
+    readonly perPage?: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry[]> {
+    return this.listComments(options)
+  }
+
+  /**
+   * List comments on a pull request. GitHub serves general PR comments from
+   * the same issue-comments endpoint.
+   */
+  async listPullComments(options: {
+    readonly project?: string
+    readonly number: number
+    readonly perPage?: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry[]> {
+    return this.listComments(options)
+  }
+
+  /**
+   * Comment on an issue (write operation).
+   * @param options - project, issue number, body, body cap, cancellation.
+   * @returns the created comment.
+   */
   async commentIssue(options: {
+    readonly project?: string
+    readonly number: number | string
+    readonly body: string
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry> {
+    return this.createComment(options)
+  }
+
+  /**
+   * Comment on a pull request (write operation).
+   * @param options - project, PR number, body, body cap, cancellation.
+   * @returns the created comment.
+   */
+  async commentPull(options: {
     readonly project?: string
     readonly number: number
     readonly body: string
+    readonly maxBytes: number
     readonly signal?: AbortSignal
-  }): Promise<GitHubEntry> {
+  }): Promise<CommentEntry> {
+    return this.createComment(options)
+  }
+
+  /** List general comments on an issue or pull request. */
+  private async listComments(options: {
+    readonly project?: string
+    readonly number: number | string
+    readonly perPage?: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry[]> {
     const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
-    const raw = await this.post<{ id: number; html_url: string; user: { login: string } | null }>(
+    const raw = await this.get<RawComment[]>(`/repos/${owner}/${repo}/issues/${options.number}/comments`, {
+      params: { per_page: pageSize(options.perPage) },
+      ...options.signal === undefined ? {} : { signal: options.signal },
+    })
+    return raw.map(comment => makeComment({
+      id: comment.id,
+      body: comment.body,
+      authorName: comment.user?.login,
+      createdAt: comment.created_at,
+      updatedAt: comment.updated_at,
+      webUrl: comment.html_url,
+    }, options.maxBytes))
+  }
+
+  /** Create one general comment on an issue or pull request. */
+  private async createComment(options: {
+    readonly project?: string
+    readonly number: number | string
+    readonly body: string
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry> {
+    const [owner, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<RawComment>(
       `/repos/${owner}/${repo}/issues/${options.number}/comments`,
       { body: options.body },
       options.signal,
     )
-    return {
-      number: options.number,
-      title: options.body,
-      state: 'comment',
+    return makeComment({
+      id: raw.id,
+      body: raw.body,
+      authorName: raw.user?.login,
+      createdAt: raw.created_at,
+      updatedAt: raw.updated_at,
       webUrl: raw.html_url,
-      authorName: raw.user?.login ?? 'unknown',
-    }
+    }, options.maxBytes)
   }
 
   /**
@@ -508,7 +598,7 @@ export class GitHubClient {
   /** One authenticated DELETE against the GitHub REST API. */
   private async del(path: string, signal?: AbortSignal): Promise<void> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = apiUrl(this.site.baseUrl, path)
     let response: Response
     try {
       response = await fetch(url, {
@@ -545,7 +635,7 @@ export class GitHubClient {
   /** One authenticated JSON write (PATCH/PUT) against the GitHub REST API. */
   private async write<T>(method: 'PATCH' | 'PUT', path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = apiUrl(this.site.baseUrl, path)
     let response: Response
     try {
       response = await fetch(url, {
@@ -575,7 +665,7 @@ export class GitHubClient {
   /** One authenticated POST against the GitHub REST API. */
   private async post<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = apiUrl(this.site.baseUrl, path)
     let response: Response
     try {
       response = await fetch(url, {
@@ -617,7 +707,7 @@ export class GitHubClient {
     readonly signal?: AbortSignal
   }): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = apiUrl(this.site.baseUrl, path)
     for (const [key, value] of Object.entries(options.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, value)
     }

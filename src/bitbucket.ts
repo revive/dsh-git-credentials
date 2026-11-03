@@ -8,7 +8,7 @@
  * @module git-bitbucket
  */
 
-import { errorDetail, errorMessage, pageSize, tokenFor, type AuthedSite } from './http.ts'
+import { apiUrl, errorDetail, errorMessage, makeComment, pageSize, tokenFor, type AuthedSite, type CommentEntry } from './http.ts'
 
 /** A repository summary as Bitbucket's API returns it. */
 export interface BitbucketRepo {
@@ -58,6 +58,17 @@ export type BitbucketPullState = 'open' | 'closed' | 'all'
 /** One page of a 2.0 list response. */
 interface Page<T> {
   readonly values: readonly T[]
+}
+
+/** Raw issue/PR comment. */
+interface RawComment {
+  readonly id: number
+  readonly content: { readonly raw: string }
+  readonly user: { readonly display_name?: string; readonly nickname?: string } | null
+  readonly created_on: string
+  readonly updated_on: string
+  readonly links: { readonly html: { readonly href: string } }
+  readonly deleted?: boolean
 }
 
 /** Raw repository entry. */
@@ -171,9 +182,9 @@ export class BitbucketClient {
   }): Promise<BitbucketFile> {
     const [workspace, repo] = splitProject(this.site.id, options.project)
     const ref = options.ref ?? (await this.defaultBranch(workspace, repo, options.signal))
-    const url = new URL(
+    const url = apiUrl(
+      this.site.baseUrl,
       `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/src/${encodeURIComponent(ref)}/${encodePath(options.path)}`,
-      `${this.site.baseUrl.replace(/\/+$/, '')}/`,
     )
     const token = tokenFor(this.tokens, this.site)
     let response: Response
@@ -427,35 +438,113 @@ export class BitbucketClient {
     return mapIssue(raw)
   }
 
+  async listIssueComments(options: {
+    readonly project?: string
+    readonly number: number | string
+    readonly perPage?: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry[]> {
+    return this.listComments('issues', options)
+  }
+
+  /** List comments on a pull request. */
+  async listPullComments(options: {
+    readonly project?: string
+    readonly number: number
+    readonly perPage?: number
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry[]> {
+    return this.listComments('pullrequests', options)
+  }
+
   /**
    * Comment on an issue (write operation).
-   * @param options - project, issue id, comment body, cancellation.
-   * @returns a comment-shaped entry (`state: "comment"`, title = comment body).
+   * @param options - project, issue id, body, body cap, cancellation.
+   * @returns the created comment.
    */
   async commentIssue(options: {
     readonly project?: string
+    readonly number: number | string
+    readonly body: string
+    readonly maxBytes: number
+    readonly signal?: AbortSignal
+  }): Promise<CommentEntry> {
+    return this.createComment('issues', options)
+  }
+
+  /**
+   * Comment on a pull request (write operation).
+   * @param options - project, PR id, body, body cap, cancellation.
+   * @returns the created comment.
+   */
+  async commentPull(options: {
+    readonly project?: string
     readonly number: number
     readonly body: string
+    readonly maxBytes: number
     readonly signal?: AbortSignal
-  }): Promise<BitbucketEntry> {
+  }): Promise<CommentEntry> {
+    return this.createComment('pullrequests', options)
+  }
+
+  /** List comments on one issue or pull request. */
+  private async listComments(
+    kind: 'issues' | 'pullrequests',
+    options: {
+      readonly project?: string
+      readonly number: number | string
+      readonly perPage?: number
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    },
+  ): Promise<CommentEntry[]> {
     const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
-    const raw = await this.post<{
-      id: number
-      content: { raw: string }
-      links: { html: { href: string } }
-      user: { display_name: string } | null
-    }>(
-      `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/issues/${options.number}/comments`,
+    const raw = await this.get<Page<RawComment>>(
+      `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/${kind}/${options.number}/comments`,
+      {
+        params: { pagelen: pageSize(options.perPage) },
+        ...options.signal === undefined ? {} : { signal: options.signal },
+      },
+    )
+    return raw.values
+      .filter(comment => comment.deleted !== true)
+      .map(comment => makeComment({
+        id: comment.id,
+        body: comment.content.raw,
+        authorName: comment.user?.display_name ?? comment.user?.nickname,
+        createdAt: comment.created_on,
+        updatedAt: comment.updated_on,
+        webUrl: comment.links.html.href,
+      }, options.maxBytes))
+  }
+
+  /** Create one comment on an issue or pull request. */
+  private async createComment(
+    kind: 'issues' | 'pullrequests',
+    options: {
+      readonly project?: string
+      readonly number: number | string
+      readonly body: string
+      readonly maxBytes: number
+      readonly signal?: AbortSignal
+    },
+  ): Promise<CommentEntry> {
+    const [workspace, repo] = splitProject(this.site.id, this.resolveProject(options.project))
+    const raw = await this.post<RawComment>(
+      `/repositories/${encodeURIComponent(workspace)}/${encodeURIComponent(repo)}/${kind}/${options.number}/comments`,
       { content: { raw: options.body } },
       options.signal,
     )
-    return {
-      number: options.number,
-      title: options.body,
-      state: 'comment',
+    return makeComment({
+      id: raw.id,
+      body: raw.content.raw,
+      authorName: raw.user?.display_name ?? raw.user?.nickname,
+      createdAt: raw.created_on,
+      updatedAt: raw.updated_on,
       webUrl: raw.links.html.href,
-      authorName: raw.user?.display_name ?? 'unknown',
-    }
+    }, options.maxBytes)
   }
 
   /**
@@ -493,7 +582,7 @@ export class BitbucketClient {
   /** One authenticated POST against the Bitbucket 2.0 API. */
   private async post<T>(path: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = apiUrl(this.site.baseUrl, path)
     let response: Response
     try {
       response = await fetch(url, {
@@ -535,7 +624,7 @@ export class BitbucketClient {
     readonly signal?: AbortSignal
   }): Promise<T> {
     const token = tokenFor(this.tokens, this.site)
-    const url = new URL(path, `${this.site.baseUrl.replace(/\/+$/, '')}/`)
+    const url = apiUrl(this.site.baseUrl, path)
     for (const [key, value] of Object.entries(options.params ?? {})) {
       if (value !== undefined) url.searchParams.set(key, value)
     }
